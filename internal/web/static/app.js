@@ -1208,11 +1208,37 @@ function scheduleModal() {
 }
 
 /* ---------- Deployments ---------- */
-const DEPLOY_KINDS = { cloudflare_pages: ['☁️', 'Cloudflare Pages'], cloudflare_worker: ['⚡', 'Cloudflare Worker'], docker: ['🐳', 'Docker'], github_pages: ['🐙', 'GitHub Pages'] };
+const DEPLOY_KINDS = { cloudflare_pages: ['☁️', 'Cloudflare Pages'], cloudflare_worker: ['⚡', 'Cloudflare Worker'], docker: ['🐳', 'Docker'], github_pages: ['🐙', 'GitHub Pages'], tunnel: ['🚇', 'Cloudflare Tunnel'] };
 function deployStatus(status) {
   const map = { live: ['Live', 'ok'], failed: ['Failed', 'bad'], removed: ['Removed', ''] };
   const [label, cls] = map[status] || [status, ''];
   return badge(label, cls);
+}
+
+// The Cloudflare Tunnel: health, public routes, and a form to add one.
+function tunnelCard(t) {
+  if (!t || !t.configured) {
+    return `<section class="card" style="margin-bottom:16px"><div class="card-head"><div><h3>🚇 Cloudflare Tunnel</h3><p>${t?.error ? esc(t.error) : 'Set <code>CLOUDFLARE_API_TOKEN</code> (Tunnel: Edit, DNS: Edit, Zone: Read) and <code>CLOUDFLARE_ACCOUNT_ID</code> to publish local apps on your domains.'}</p></div></div></section>`;
+  }
+  if (!t.id) {
+    return `<section class="card" style="margin-bottom:16px"><div class="card-head"><div><h3>🚇 Cloudflare Tunnel</h3><p>No tunnel yet. Ask it <em>“set up the Cloudflare tunnel”</em> (tunnel_setup), or set <code>CLOUDFLARE_TUNNEL_TOKEN</code>.</p></div></div></section>`;
+  }
+  const health = { healthy: ['healthy', 'ok'], degraded: ['degraded', 'warn'], down: ['down', 'bad'], inactive: ['no connector', 'bad'] }[t.status] || [t.status || 'unknown', ''];
+  const routes = t.routes || [];
+  return `<section class="card" style="margin-bottom:16px"><div class="card-head"><div><h3>🚇 Cloudflare Tunnel</h3><p>${esc(t.name || '')} <span class="mono tiny">${esc(t.id)}</span>${t.connections ? ` · ${fmtNum(t.connections)} connection${t.connections > 1 ? 's' : ''}` : ''}</p></div><div class="row">${badge(health[0], health[1])}</div></div>
+    ${t.error ? `<div class="card-body"><p class="small" style="color:var(--blk)">${esc(t.error)}</p></div>` : ''}
+    <form class="card-body" id="tunnel-form" style="padding-bottom:14px">
+      <div class="row wrap member-add">
+        <input class="input sm mono" name="hostname" placeholder="app.example.com" required style="flex:1;min-width:170px" aria-label="Public hostname">
+        <input class="input sm mono" name="service" placeholder="http://localhost:3000" required style="flex:1;min-width:170px" aria-label="Local service">
+        <input class="input sm mono" name="path" placeholder="path (optional)" style="width:130px" aria-label="Path">
+        <button class="btn sm primary" type="submit">${icon('plus', 'btn-icon')} Publish</button>
+      </div>
+    </form>
+    <div class="card-body flush">${routes.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Public URL</th><th>Service</th><th></th></tr></thead><tbody>${routes.map((r) => `
+      <tr><td class="truncate-cell"><a href="https://${esc(r.hostname)}" target="_blank" rel="noopener noreferrer">https://${esc(r.hostname)}${esc(r.path || '')}</a></td><td class="mono small">${esc(r.service)}</td>
+      <td class="actions"><button class="icon-btn danger" data-action="tunnel-remove" data-id="${esc(r.hostname)}" aria-label="Remove" title="Unpublish">${icon('trash')}</button></td></tr>`).join('')}</tbody></table></div>`
+      : emptyState('No public route', 'Publish a local service above, or ask it “put my app on app.example.com”.')}</div></section>`;
 }
 
 async function renderDeployments() {
@@ -1221,11 +1247,13 @@ async function renderDeployments() {
   setCrumbs('Deployments');
   const view = document.getElementById('view');
   let data;
-  try { data = await api('/deployments'); } catch (error) { view.innerHTML = errorState(error.message); return; }
+  let tunnel;
+  try { [data, tunnel] = await Promise.all([api('/deployments'), api('/tunnel').catch((error) => ({ error: error.message }))]); } catch (error) { view.innerHTML = errorState(error.message); return; }
   if (seq !== state.routeSeq) return;
   const items = data.items || [];
   const historyRows = data.history || [];
-  view.innerHTML = `${pageHead('Deployments', 'Everything it has put live: Cloudflare Pages & Workers, Docker containers on the host, GitHub Pages.', '', 'Actions')}
+  view.innerHTML = `${pageHead('Deployments', 'Everything it has put live: Cloudflare Pages & Workers, Docker containers, GitHub Pages, Cloudflare Tunnel routes.', '', 'Actions')}
+    ${tunnelCard(tunnel)}
     ${items.length ? `<div class="deploy-grid" style="margin-bottom:16px">${items.map((d) => `
       <section class="card deploy-card">
         <div class="top"><div class="big emoji">${(DEPLOY_KINDS[d.kind] || ['🚀'])[0]}</div><div style="min-width:0;flex:1"><h3>${esc(d.name)}</h3><div class="tiny muted">${esc((DEPLOY_KINDS[d.kind] || ['', d.kind])[1])}</div></div>${deployStatus(d.status)}</div>
@@ -1668,6 +1696,9 @@ document.addEventListener('click', async (event) => {
         confirmDialog({ title: 'Remove from the allowlist?', message: `This person will get the default profile (${state.cache.access?.default || 'guest'}).`, confirm: 'Remove', onConfirm: async () => { await api(`/access/members/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast('Removed from the allowlist'); await renderAccess(); } });
         break;
       case 'llm-test': await testModel(target); break;
+      case 'tunnel-remove':
+        confirmDialog({ title: `Unpublish ${id}?`, message: 'The route and its DNS record (if it points to the tunnel) are deleted.', confirm: 'Unpublish', onConfirm: async () => { const res = await api(`/tunnel/routes?${new URLSearchParams({ hostname: id })}`, { method: 'DELETE' }); toast(`🚇 ${res.message}`); await renderDeployments(); } });
+        break;
       case 'vault-sync': {
         target.disabled = true;
         const res = await api('/vault/sync', { method: 'POST' });
@@ -1755,6 +1786,11 @@ document.addEventListener('submit', async (event) => {
       if (match) user = match.slack_id;
       await api(`/access/members/${encodeURIComponent(user)}`, { method: 'PUT', body: { profile: fd.get('profile'), note: fd.get('note') } });
       toast('✅ Added to the allowlist'); await renderAccess();
+    });
+  } else if (form.id === 'tunnel-form') {
+    await run(async () => {
+      const res = await api('/tunnel/routes', { method: 'POST', body: { hostname: fd.get('hostname'), service: fd.get('service'), path: fd.get('path') } });
+      toast(`🚇 ${res.message}`); await renderDeployments();
     });
   } else if (form.id === 'profile-form') {
     await run(() => saveProfile(form));

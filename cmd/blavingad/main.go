@@ -301,7 +301,8 @@ func serve() int {
 	}
 }
 
-// update is meant for `docker exec blavingad blavingad update [--pull]`: it
+// update is meant for `docker exec blavingad blavingad update [--pull]` (or a
+// plain `blavingad update` inside an LXC/VM install): it
 // rebuilds from SOURCE_DIR (after a git pull from SELF_REPO with --pull) and
 // asks the running agent to restart on the new binary.
 func update(args []string) int {

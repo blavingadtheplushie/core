@@ -164,6 +164,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/schedules/{id}/run", a(s.runSchedule))
 
 	mux.HandleFunc("GET /api/deployments", a(s.listDeployments))
+	mux.HandleFunc("GET /api/tunnel", a(s.getTunnel))
+	mux.HandleFunc("POST /api/tunnel/routes", a(s.addTunnelRoute))
+	mux.HandleFunc("DELETE /api/tunnel/routes", a(s.removeTunnelRoute))
 	mux.HandleFunc("GET /api/emails", a(s.listEmails))
 	mux.HandleFunc("GET /api/emails/{id}", a(s.getEmail))
 	mux.HandleFunc("POST /api/emails/refresh", a(s.refreshEmails))

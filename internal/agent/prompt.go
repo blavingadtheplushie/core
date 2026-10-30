@@ -1,11 +1,15 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"blavingad/internal/cloudflare"
 	"blavingad/internal/core"
 	"blavingad/internal/memory"
 )
@@ -45,6 +49,7 @@ func (r *Runner) environment(rc *core.RunContext) string {
 	fmt.Fprintf(&b, "- Now: %s (%s)\n", now.Format("Monday, January 2 2006, 15:04"), r.cfg.TZName)
 	fmt.Fprintf(&b, "- Workspace (your files, persistent): %s\n", r.cfg.WorkspaceDir)
 	fmt.Fprintf(&b, "- Your source code: %s\n", r.cfg.SourceDir)
+	fmt.Fprintf(&b, "- System: %s\n", systemLine())
 	if r.cfg.SMTPConfigured() || r.cfg.IMAPConfigured() {
 		fmt.Fprintf(&b, "- Your email address: %s\n", r.cfg.EmailFrom)
 	}
@@ -72,6 +77,13 @@ func (r *Runner) environment(rc *core.RunContext) string {
 	}
 	if r.cfg.GitHubConfigured() {
 		deploy = append(deploy, "GitHub Pages")
+	}
+	if cloudflare.New(r.cfg).Configured() {
+		if cloudflare.TunnelID(r.cfg, r.st) != "" {
+			deploy = append(deploy, "Cloudflare Tunnel (public HTTPS hostnames for local services: tunnel_route_add, or deploy_docker with hostname)")
+		} else {
+			deploy = append(deploy, "Cloudflare Tunnel (not set up yet: tunnel_setup)")
+		}
 	}
 	if len(deploy) > 0 {
 		fmt.Fprintf(&b, "- Deploy targets: %s\n", strings.Join(deploy, ", "))
@@ -201,4 +213,37 @@ func firstNonEmpty(v ...string) string {
 		}
 	}
 	return ""
+}
+
+var system = sync.OnceValue(func() string {
+	kind := "Linux"
+	if b, err := os.ReadFile("/etc/os-release"); err == nil {
+		for _, l := range strings.Split(string(b), "\n") {
+			if v, ok := strings.CutPrefix(l, "PRETTY_NAME="); ok {
+				kind = strings.Trim(v, `"`)
+			}
+		}
+	}
+	env, _ := os.ReadFile("/proc/1/environ")
+	switch {
+	case bytes.Contains(env, []byte("container=lxc")):
+		kind += ", in an LXC container (systemd runs your service: blavingad.service)"
+	case fileExists("/.dockerenv") || fileExists("/run/.containerenv"):
+		kind += ", in a Docker/Podman container (no systemd)"
+	}
+	return kind
+})
+
+// systemLine tells the model where it runs and with which rights.
+func systemLine() string {
+	s := system()
+	if os.Geteuid() == 0 {
+		s += " — you are root: you may install packages (apt-get install -y …) and manage services; shell commands still go through approval"
+	}
+	return s
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }

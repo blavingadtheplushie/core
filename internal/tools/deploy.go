@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"blavingad/internal/cloudflare"
 	"blavingad/internal/core"
 	"blavingad/internal/store"
 )
@@ -115,18 +116,19 @@ func registerDeploy(d *Deps) {
 		Name: "deploy_docker", Category: "deploy", Emoji: "🐳", Risk: core.RiskSensitive, Available: dockerOK,
 		Description: "Deploys an app as a Docker container on the host: builds from a folder with a Dockerfile (or uses an existing image), then (re)starts the container persistently and exposes it. Returns the URL.",
 		Params: core.Obj(map[string]any{
-			"name":  core.Str("App name (lowercase, dashes)."),
-			"path":  core.Str("Folder containing the Dockerfile (or empty if using an image)."),
-			"image": core.Str("Image to run when there is no build (e.g. nginx:alpine)."),
-			"port":  core.Int("Port listened on INSIDE the container (e.g. 3000)."),
-			"env":   map[string]any{"type": "object", "description": "Environment variables.", "additionalProperties": map[string]any{"type": "string"}},
+			"name":     core.Str("App name (lowercase, dashes)."),
+			"path":     core.Str("Folder containing the Dockerfile (or empty if using an image)."),
+			"image":    core.Str("Image to run when there is no build (e.g. nginx:alpine)."),
+			"port":     core.Int("Port listened on INSIDE the container (e.g. 3000)."),
+			"env":      map[string]any{"type": "object", "description": "Environment variables.", "additionalProperties": map[string]any{"type": "string"}},
+			"hostname": core.Str("Optional public hostname (e.g. app.example.com) to publish it through the Cloudflare Tunnel, with HTTPS."),
 		}, "name", "port"),
 		Summarize: summarizeField("Docker: ", "name", 40),
 		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
 			a, _ := core.Parse[struct {
-				Name, Path, Image string
-				Port              int
-				Env               map[string]string
+				Name, Path, Image, Hostname string
+				Port                        int
+				Env                         map[string]string
 			}](args)
 			name := slugify(a.Name)
 			if name == "" || a.Port <= 0 {
@@ -189,8 +191,19 @@ func registerDeploy(d *Deps) {
 			time.Sleep(3 * time.Second)
 			state := d.sh(ctx, "", "docker inspect -f '{{.State.Status}}' "+q(container), 30*time.Second)
 			logs := d.sh(ctx, "", "docker logs --tail 20 "+q(container), 30*time.Second)
-			d.recordDeploy(rc, "docker", name, url, "live", map[string]any{"image": image, "port": hostPort, "container_port": a.Port, "container": container})
-			return fmt.Sprintf("✅ %s started (%s) → %s\n\nLatest logs:\n%s", container, strings.TrimSpace(state.Output), url, Clip(logs.Output, 2000)), nil
+			tunnelNote := ""
+			if a.Hostname != "" {
+				if cf, id, err := d.tunnel(); err != nil {
+					tunnelNote = "\n⚠️ Not published on " + a.Hostname + ": " + err.Error()
+				} else if msg, err := cf.AddRoute(ctx, id, cloudflare.Route{Hostname: a.Hostname, Service: d.tunnelService(container, hostPort, a.Port)}); err != nil {
+					tunnelNote = "\n⚠️ Not published on " + a.Hostname + ": " + err.Error()
+				} else {
+					url = "https://" + strings.ToLower(strings.TrimSpace(a.Hostname))
+					tunnelNote = "\n🚇 " + msg
+				}
+			}
+			d.recordDeploy(rc, "docker", name, url, "live", map[string]any{"image": image, "port": hostPort, "container_port": a.Port, "container": container, "hostname": a.Hostname})
+			return fmt.Sprintf("✅ %s started (%s) → %s%s\n\nLatest logs:\n%s", container, strings.TrimSpace(state.Output), url, tunnelNote, Clip(logs.Output, 2000)), nil
 		},
 	})
 

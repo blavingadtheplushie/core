@@ -64,6 +64,10 @@ type Config struct {
 
 	CloudflareToken   string
 	CloudflareAccount string
+	// Cloudflare Tunnel: the connector token (cloudflared) and/or the
+	// tunnel id; either is enough for the agent to manage routes.
+	CloudflareTunnelToken string
+	CloudflareTunnelID    string
 
 	DockerEnabled  bool
 	DeployHost     string
@@ -127,8 +131,10 @@ func Load() *Config {
 		EmailFrom:    env("EMAIL_FROM", ""),
 		EmailPoll:    time.Duration(envInt("EMAIL_POLL_SECONDS", 90)) * time.Second,
 
-		CloudflareToken:   env("CLOUDFLARE_API_TOKEN", ""),
-		CloudflareAccount: env("CLOUDFLARE_ACCOUNT_ID", ""),
+		CloudflareToken:       env("CLOUDFLARE_API_TOKEN", ""),
+		CloudflareAccount:     env("CLOUDFLARE_ACCOUNT_ID", ""),
+		CloudflareTunnelToken: env("CLOUDFLARE_TUNNEL_TOKEN", ""),
+		CloudflareTunnelID:    env("CLOUDFLARE_TUNNEL_ID", ""),
 
 		DockerEnabled:  envBool("DOCKER_DEPLOY", fileExists("/var/run/docker.sock")),
 		DeployHost:     env("DEPLOY_HOST", "localhost"),
@@ -204,7 +210,7 @@ var VaultKeys = []string{
 	"LLM_API_KEY", "EMBED_API_KEY", "EXA_API_KEY",
 	"GITHUB_TOKEN", "GITHUB_USER",
 	"IMAP_USER", "IMAP_PASSWORD", "SMTP_USER", "SMTP_PASSWORD", "EMAIL_FROM",
-	"CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID",
+	"CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_TUNNEL_TOKEN",
 	"OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "SESSION_SECRET", "ADMIN_PASSWORD",
 }
 
@@ -213,7 +219,7 @@ var VaultKeys = []string{
 // inherit them.
 var secretEnv = []string{
 	"LLM_API_KEY", "EMBED_API_KEY", "EXA_API_KEY", "GITHUB_TOKEN", "IMAP_PASSWORD", "SMTP_PASSWORD",
-	"CLOUDFLARE_API_TOKEN", "OIDC_CLIENT_SECRET", "SESSION_SECRET", "ADMIN_PASSWORD",
+	"CLOUDFLARE_API_TOKEN", "CLOUDFLARE_TUNNEL_TOKEN", "OIDC_CLIENT_SECRET", "SESSION_SECRET", "ADMIN_PASSWORD",
 	"SLACK_BOT_TOKEN", "SLACK_APP_TOKEN",
 	"VAULT_CLIENT_ID", "VAULT_CLIENT_SECRET", "VAULT_MASTER_PASSWORD", "BW_SESSION", "BW_PASSWORD", "BW_CLIENTID", "BW_CLIENTSECRET",
 }
@@ -227,7 +233,7 @@ func ScrubEnv() {
 // SecretValues returns every secret held by the config, for masking.
 func (c *Config) SecretValues() []string {
 	return []string{c.LLMAPIKey, c.EmbedAPIKey, c.ExaAPIKey, c.GitHubToken, c.IMAPPassword, c.SMTPPassword,
-		c.CloudflareToken, c.OIDCClientSecret, c.SessionSecret, c.AdminPassword, c.SlackBotToken, c.SlackAppToken}
+		c.CloudflareToken, c.CloudflareTunnelToken, c.OIDCClientSecret, c.SessionSecret, c.AdminPassword, c.SlackBotToken, c.SlackAppToken}
 }
 
 // headers parses "Name: value; Other-Name: value".

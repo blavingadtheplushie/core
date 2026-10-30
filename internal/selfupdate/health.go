@@ -173,7 +173,7 @@ func (m *Manager) EnsureWritable(ctx context.Context) string {
 }
 
 func (m *Manager) writeProblem(dir string, c WriteCheck, why string) string {
-	msg := fmt.Sprintf("⚠️ I can't write to my source directory %s, so I can't modify my own code. %d file(s) affected, e.g. %s: %s. I tried to fix it but %s. Fix from the host, e.g. `podman exec -u 0 <container> chown -R 0:0 %s`; with SELinux, `chcon -R --reference=<volume mountpoint> <volume mountpoint>/src`.",
+	msg := fmt.Sprintf("⚠️ I can't write to my source directory %s, so I can't modify my own code. %d file(s) affected, e.g. %s: %s. I tried to fix it but %s. Fix it as root, e.g. `chown -R 0:0 %s` (Docker/Podman: through `exec -u 0`; Proxmox LXC: `pct exec <ctid> --`); with SELinux, `chcon -R --reference=<volume mountpoint> <volume mountpoint>/src`.",
 		dir, c.Failures, c.Example, c.Cause, why, dir)
 	slog.Error("source dir not writable", "detail", msg)
 	return msg

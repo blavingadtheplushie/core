@@ -52,6 +52,7 @@ func RegisterAll(d *Deps) {
 	registerGitHub(d)
 	registerEmail(d)
 	registerDeploy(d)
+	registerTunnel(d)
 	registerSelf(d)
 	registerSchedule(d)
 	registerAccess(d)

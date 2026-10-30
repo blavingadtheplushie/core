@@ -20,7 +20,7 @@ design system, protected by OIDC.
 | 💻 **Code** | Shell inside the container (git, gh, go, node, bun, python, wrangler, docker), file read/write/edit, ripgrep search. |
 | 🐙 **GitHub** | Its own account: full REST API, search, repository creation, git push. |
 | 📬 **Email** | Its own address (IMAP/SMTP): it reads, summarizes, replies — and can handle incoming mail on its own. |
-| 🚀 **Deployment** | Cloudflare Pages & Workers, Docker containers on the host (with optional Traefik + HTTPS), GitHub Pages. |
+| 🚀 **Deployment** | Cloudflare Pages & Workers, Docker containers on the host (with optional Traefik + HTTPS), GitHub Pages, and a **Cloudflare Tunnel**: it publishes any local service on your domains (`tunnel_route_add`, or `deploy_docker` with a `hostname`), DNS included. |
 | ⏰ **Tasks** | Reminders and cron routines it runs with all of its tools. |
 | 🧑‍🚀 **Sub-agents** | It delegates subtasks to sub-agents working in parallel. |
 | 🧬 **Self-improvement** | Rewrites its persona, builds up skills, **creates new tools for itself** that are hot-loaded, and **modifies its own Go code** (build + tests → commit → push → restart, with **automatic rollback** if the new version crashes). Daily review of its mistakes and 👎 feedback. |
@@ -127,6 +127,50 @@ docker compose logs -f
 
 The dashboard listens on port `8080` (put it behind your reverse proxy with
 HTTPS and set `PUBLIC_URL`).
+
+### 5 bis. Or as a Proxmox VE LXC container
+
+The agent then runs **as root** in its own Debian container: it can
+`apt-get install`, manage services, and run Docker inside it for its deploys
+(nesting enabled). Shell commands still go through approval.
+
+On the PVE host, from a checkout of the repo with your `.env`:
+
+```bash
+./deploy/proxmox/create-lxc.sh
+# options through the environment, e.g.:
+CTID=210 IP=192.168.1.50/24 GW=192.168.1.1 STORAGE=local-zfs ./deploy/proxmox/create-lxc.sh
+# or without a checkout: clone the code inside the container
+REPO=https://github.com/blavingadtheplushie/core.git GIT_TOKEN=github_pat_… \
+  ENV_FILE=/root/blavingad.env ./create-lxc.sh
+```
+
+It downloads a Debian template, creates an unprivileged container
+(`nesting=1,keyctl=1`, starts on boot), installs the same toolbox as the
+image (Go, Node, wrangler, `bw`, bun, gh, Docker), builds the binary and starts
+the `blavingad` systemd service. `localhost`/`example.com` values of
+`PUBLIC_URL` and `DEPLOY_HOST` are pointed at the container's IP. Config lives
+in `/etc/blavingad/blavingad.env` (read literally by systemd: no `$$`
+escaping). In the container, `blavingadctl update --pull | logs | status |
+restart | env`.
+
+`cloudflared` is installed too. Pass `CF_TUNNEL_TOKEN=…` (or put a literal
+`CLOUDFLARE_TUNNEL_TOKEN` in `.env`) to start the tunnel right away, or leave
+it empty and ask the agent *“set up the Cloudflare tunnel”*: with
+`CLOUDFLARE_API_TOKEN` (Tunnel: Edit, DNS: Edit, Zone: Read) and
+`CLOUDFLARE_ACCOUNT_ID` it creates the tunnel and starts `cloudflared` itself.
+It then publishes apps with *“put it on app.example.com”*; routes are listed
+(and editable) in **Deployments**.
+
+To keep the memory of an existing Docker/Podman install, stop it, pack its
+data volume and pass it as `DATA_TGZ`:
+
+```bash
+docker stop blavingad
+tar -C "$(docker volume inspect agentai_blavingad-data -f '{{.Mountpoint}}')" \
+    -czf blavingad-data.tgz --exclude=./src --exclude='./src-*' --exclude=./bin --exclude=./vault-cli .
+DATA_TGZ=./blavingad-data.tgz ./deploy/proxmox/create-lxc.sh
+```
 
 ---
 

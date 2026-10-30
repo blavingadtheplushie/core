@@ -44,6 +44,14 @@ tini → blavingad supervise          (internal/selfupdate/supervisor.go)
           └─ <active binary> serve  (cmd/blavingad/main.go)
 ```
 
+Two ways to run it, same layout (`/data`, `/workspace`, seed in
+`/opt/blavingad/src`, base binary `/usr/local/bin/blavingad`):
+- Docker/Podman image (`Dockerfile`): `tini` is PID 1, config from the env file.
+- Proxmox LXC (`deploy/proxmox/create-lxc.sh`): systemd `blavingad.service`
+  runs `supervise` **as root**, config in `/etc/blavingad/blavingad.env`,
+  Docker engine inside the container. `blavingadctl update` runs the update
+  with the service's environment. The prompt's "System" line tells which.
+
 - Active binary: `/data/bin/blavingad` if present (self-built), else the image's
   `/usr/local/bin/blavingad`.
 - `self_upgrade` builds into `/data/bin/blavingad.build`, commits, pushes to
@@ -74,6 +82,7 @@ tini → blavingad supervise          (internal/selfupdate/supervisor.go)
 | `internal/tools` | All built-in tools + agent-authored custom tools |
 | `internal/slackbot` | Socket Mode, message indexing, Block Kit layouts (`live.go`: working/final message, `blocks.go`: feedback row + reflection update, `interactive.go`: approvals, Stop/feedback buttons, Home tab), mrkdwn |
 | `internal/mail` | IMAP polling + SMTP sending |
+| `internal/cloudflare` | Cloudflare Tunnel API: tunnel lookup/creation, ingress routes (catch-all kept last), proxied DNS CNAMEs |
 | `internal/vault` | Vaultwarden through the Bitwarden CLI: unlock, in-memory cache, `vault://` references, env resolution, save/generate |
 | `internal/scheduler` | Cron / one-shot tasks |
 | `internal/selfupdate` | Supervisor, build/upgrade/rollback, git plumbing |

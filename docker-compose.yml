@@ -20,6 +20,20 @@ services:
       - apps
     stop_grace_period: 30s
 
+  # Optional: Cloudflare Tunnel connector (`docker compose --profile tunnel up -d`).
+  # Needs a literal CLOUDFLARE_TUNNEL_TOKEN in .env (or ask the agent for
+  # tunnel_setup first). Routes reach apps by container name, e.g.
+  # http://blv-myapp:3000, or the dashboard at http://blavingad:8080.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: [tunnel]
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    networks:
+      - apps
+
   # Optional: Traefik to automatically expose deployed apps at
   # https://<app>.<DEPLOY_DOMAIN>. Uncomment and set DEPLOY_TRAEFIK=true.
   # traefik:

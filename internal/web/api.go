@@ -165,6 +165,7 @@ func (s *Server) integrations() []map[string]any {
 		{"key": "email", "label": "Email", "emoji": "📬", "ok": emailOK, "configured": c.IMAPConfigured() || c.SMTPConfigured(), "detail": emailDetail},
 		{"key": "cloudflare", "label": "Cloudflare", "emoji": "☁️", "ok": c.CloudflareConfigured(), "detail": map[bool]string{true: "account " + short(c.CloudflareAccount, 8), false: "not configured"}[c.CloudflareConfigured()]},
 		{"key": "docker", "label": "Docker", "emoji": "🐳", "ok": c.DockerEnabled, "detail": docker},
+		s.tunnelIntegration(),
 		{"key": "oidc", "label": "SSO (OIDC)", "emoji": "🛡️", "ok": c.OIDCConfigured(), "detail": oidcDetail},
 	}
 }

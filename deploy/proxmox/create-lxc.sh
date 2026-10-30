@@ -20,6 +20,7 @@
 #   ENV_FILE (<repo>/.env)   SRC_DIR (the repo this script lives in)
 #   REPO / BRANCH (main) / GIT_TOKEN   clone instead of pushing SRC_DIR
 #   SSH_KEY (path to a public key for root)   PASSWORD (root password)
+#   TEMPLATE (force a template, e.g. debian-13-standard_13.6-1_amd64.tar.zst)
 #   DATA_TGZ (tarball of an existing /data to migrate: DB, memories…)
 #   TUNNEL (1: install cloudflared)   CF_TUNNEL_TOKEN (connector token: starts the
 #     tunnel right away; defaults to a literal CLOUDFLARE_TUNNEL_TOKEN of the env file.
@@ -81,9 +82,13 @@ trap 'rm -rf "$TMP"' EXIT
 # ---------- template ----------
 say "Looking for a Debian template"
 pveam update >/dev/null 2>&1 || warn "pveam update failed, using the cached list"
-TEMPLATE=$(pveam available --section system | awk '{print $2}' | grep -E '^debian-13-standard' | sort -V | tail -1 || true)
-[ -n "$TEMPLATE" ] || TEMPLATE=$(pveam available --section system | awk '{print $2}' | grep -E '^debian-12-standard' | sort -V | tail -1 || true)
-[ -n "$TEMPLATE" ] || die "no Debian template available (pveam available --section system)"
+# Templates exist for several architectures: only take the host's.
+HOST_ARCH=$(dpkg --print-architecture)
+pick() { pveam available --section system | awk '{print $2}' | grep -E "^$1_.*_${HOST_ARCH}\.tar" | sort -V | tail -1 || true; }
+TEMPLATE=${TEMPLATE:-$(pick debian-13-standard)}
+[ -n "$TEMPLATE" ] || TEMPLATE=$(pick debian-12-standard)
+[ -n "$TEMPLATE" ] || die "no Debian template for $HOST_ARCH (pveam available --section system)"
+case "$TEMPLATE" in *"_${HOST_ARCH}."*) ;; *) die "template $TEMPLATE is not for this host ($HOST_ARCH)" ;; esac
 if ! pveam list "$TEMPLATE_STORAGE" | grep -q "$TEMPLATE"; then
   say "Downloading $TEMPLATE"
   pveam download "$TEMPLATE_STORAGE" "$TEMPLATE"

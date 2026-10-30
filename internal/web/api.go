@@ -829,6 +829,13 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, 400, "model is required")
 				return
 			}
+		case "email_profile":
+			val = strings.TrimSpace(val)
+			if _, ok := s.access.Profile(val); !ok || val == "admin" {
+				writeErr(w, 400, "email profile must be an existing, non-admin access profile")
+				return
+			}
+			v = val
 		case "api_style":
 			if val != llm.StyleOpenAI && val != llm.StyleAnthropic {
 				writeErr(w, 400, "api_style must be openai or anthropic")

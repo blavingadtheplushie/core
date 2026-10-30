@@ -145,9 +145,20 @@ func registerEmail(d *Deps) {
 				Body string
 				Cc   []string
 			}](args)
+			// An autonomous email run may only answer the email that triggered it,
+			// to its sender, without CC.
+			if rc.EmailID != 0 {
+				if a.ID != rc.EmailID {
+					return "", fmt.Errorf("in this email run you can only reply to email #%d", rc.EmailID)
+				}
+				a.Cc = nil
+			}
 			orig, err := d.Mail.Get(a.ID)
 			if err != nil {
 				return "", fmt.Errorf("email #%d not found", a.ID)
+			}
+			if orig.Direction != "in" {
+				return "", fmt.Errorf("email #%d is not a received email", a.ID)
 			}
 			subject := orig.Subject
 			if !strings.HasPrefix(strings.ToLower(subject), "re:") {

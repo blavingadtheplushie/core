@@ -74,7 +74,15 @@ type Request struct {
 	AllowTools  []string
 	// Profile restricts tools/memory for the person behind the run (nil =
 	// full access, for system runs).
-	Profile    *core.Profile
+	Profile *core.Profile
+	// GrantTools adds tools on top of the profile (e.g. email_reply for an
+	// autonomous email run under the guest profile).
+	GrantTools []string
+	// AutoApprove lists granted tools that run without a human approval;
+	// their handlers must scope what they do (see RunContext.EmailID).
+	AutoApprove []string
+	// EmailID is the incoming email that triggered the run (Source email).
+	EmailID    int64
 	NoReflect  bool
 	OnProgress func(Progress)
 	// OnStart receives the run id as soon as it exists.
@@ -189,7 +197,7 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 		prof = &full
 	}
 	rc := &core.RunContext{RunID: res.RunID, Source: req.Source, Channel: req.Channel, ChannelName: req.ChannelName, ThreadTS: req.ThreadTS,
-		MessageTS: req.MessageTS, UserID: req.UserID, UserName: req.UserName, Depth: req.Depth, Profile: prof,
+		MessageTS: req.MessageTS, UserID: req.UserID, UserName: req.UserName, Depth: req.Depth, Profile: prof, EmailID: req.EmailID,
 		Progress: func(line string) { progress(Progress{Kind: "note", Label: line}) }}
 
 	var runErr error
@@ -254,10 +262,22 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 	if req.Depth >= 2 {
 		deny = map[string]bool{"delegate": true, "self_upgrade": true, "self_rollback": true}
 	}
+	grant := map[string]bool{}
+	for _, t := range req.GrantTools {
+		grant[t] = true
+	}
 	rc.Allowed = map[string]bool{}
 	for _, t := range r.reg.All() {
-		if prof.Allows(t) && (requested == nil || requested[t.Name]) && !deny[t.Name] {
+		if (prof.Allows(t) || grant[t.Name]) && (requested == nil || requested[t.Name]) && !deny[t.Name] {
 			rc.Allowed[t.Name] = true
+		}
+	}
+	for _, t := range req.AutoApprove {
+		if rc.Allowed[t] {
+			if rc.AutoApprove == nil {
+				rc.AutoApprove = map[string]bool{}
+			}
+			rc.AutoApprove[t] = true
 		}
 	}
 	defs := r.reg.Definitions(rc.Allowed, nil)
@@ -456,7 +476,7 @@ func (r *Runner) execTool(ctx context.Context, rc *core.RunContext, tc llm.ToolC
 		status = "error"
 		return "This tool has been disabled by an admin."
 	}
-	if r.needsApproval(t, args) {
+	if r.needsApproval(t, args) && !rc.AutoApprove[name] {
 		astart := time.Now()
 		err := r.approvals.Request(ctx, rc, t, args)
 		decision, note := "approved", ""

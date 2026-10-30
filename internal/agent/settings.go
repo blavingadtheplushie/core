@@ -21,12 +21,13 @@ type Settings struct {
 	SelfReviewCron string  `json:"self_review_cron"`
 	FollowThreads  bool    `json:"follow_threads"`
 	EmailAuto      bool    `json:"email_auto"`
+	EmailProfile   string  `json:"email_profile"` // access profile of email senders
 	HomeChannel    string  `json:"home_channel"`
 	ChannelDigest  bool    `json:"channel_digest"`
 	ExtraPrompt    string  `json:"extra_prompt"`
 }
 
-var SettingKeys = []string{"api_style", "base_url", "model", "fast_model", "temperature", "max_iterations", "reflection", "self_review", "self_review_cron", "follow_threads", "email_auto", "home_channel", "channel_digest", "extra_prompt"}
+var SettingKeys = []string{"api_style", "base_url", "model", "fast_model", "temperature", "max_iterations", "reflection", "self_review", "self_review_cron", "follow_threads", "email_auto", "email_profile", "home_channel", "channel_digest", "extra_prompt"}
 
 func LoadSettings(st *store.Store, cfg *config.Config) Settings {
 	get := func(k, def string) string { return st.GetSetting("agent."+k, def) }
@@ -54,6 +55,7 @@ func LoadSettings(st *store.Store, cfg *config.Config) Settings {
 		SelfReviewCron: get("self_review_cron", "30 4 * * *"),
 		FollowThreads:  b("follow_threads", true),
 		EmailAuto:      b("email_auto", false),
+		EmailProfile:   get("email_profile", "guest"),
 		HomeChannel:    get("home_channel", cfg.SlackHomeChannel),
 		ChannelDigest:  b("channel_digest", true),
 		ExtraPrompt:    get("extra_prompt", ""),

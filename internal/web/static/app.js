@@ -1363,10 +1363,11 @@ async function renderSettings() {
           ${switchRow('reflection', 'Reflect after each conversation', 'Automatically extracts lasting memories and updates people notes.', s.reflection)}
           ${switchRow('follow_threads', 'Follow threads', 'Replies in threads it has already spoken in, without being mentioned again.', s.follow_threads)}
           ${switchRow('channel_digest', 'Channel digests', 'Continuously summarizes the channels it reads to keep their context.', s.channel_digest)}
-          ${switchRow('email_auto', 'Handle emails on its own', 'Reads every incoming email and can reply (sending still follows the tool’s policy).', s.email_auto)}
+          ${switchRow('email_auto', 'Handle emails on its own', 'Reads every incoming email and answers it directly, with the sender’s access profile below. Auto-replies, mailing lists and no-reply senders are skipped; max 3 replies per sender per day.', s.email_auto)}
           ${switchRow('self_review', 'Daily self-review', 'Analyzes its errors and feedback, then improves autonomously.', s.self_review)}
           <div class="form-grid" style="margin-top:12px">
             <div class="field"><label class="label" for="set-cron">Self-review schedule (cron)</label><input class="input mono" id="set-cron" name="self_review_cron" value="${esc(s.self_review_cron)}"></div>
+            <div class="field"><label class="label" for="set-email-profile">Email senders’ profile</label><input class="input mono" id="set-email-profile" name="email_profile" value="${esc(s.email_profile || 'guest')}" placeholder="guest"><span class="field-note">Access profile applied to incoming emails (see Access).</span></div>
             <div class="field"><label class="label" for="set-home">Home channel (Slack ID)</label><input class="input mono" id="set-home" name="home_channel" value="${esc(s.home_channel)}" placeholder="C0123ABCD"><span class="field-note">Announcements, reports, approvals from outside Slack.</span></div>
           </div>
         </div></section>
@@ -1399,7 +1400,7 @@ async function renderSettings() {
 async function saveSettings(form, quiet = false) {
   const fd = new FormData(form);
   const body = {};
-  for (const key of ['api_style', 'base_url', 'model', 'fast_model', 'temperature', 'max_iterations', 'extra_prompt', 'self_review_cron', 'home_channel']) body[key] = String(fd.get(key) ?? '').trim();
+  for (const key of ['api_style', 'base_url', 'model', 'fast_model', 'temperature', 'max_iterations', 'extra_prompt', 'self_review_cron', 'email_profile', 'home_channel']) body[key] = String(fd.get(key) ?? '').trim();
   for (const key of ['reflection', 'follow_threads', 'channel_digest', 'email_auto', 'self_review']) body[key] = form.querySelector(`[name="${key}"]`).checked;
   try {
     await api('/settings', { method: 'PATCH', body });

@@ -28,6 +28,11 @@ type RunContext struct {
 	Profile *Profile
 	// Allowed is the resolved tool allowlist, re-checked at execution time.
 	Allowed map[string]bool
+	// AutoApprove: tools granted to this run that skip human approval.
+	AutoApprove map[string]bool
+	// EmailID is the incoming email behind an autonomous email run; email
+	// tools restrict themselves to that thread.
+	EmailID int64
 	// Progress lets long tools stream a status line to the surface.
 	Progress func(line string)
 }

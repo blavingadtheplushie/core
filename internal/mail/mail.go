@@ -41,6 +41,8 @@ type Email struct {
 	Subject   string `json:"subject"`
 	Body      string `json:"body"`
 	RunID     string `json:"run_id"`
+	// Automated is true for auto-replies, bounces and bulk mail (never stored).
+	Automated bool   `json:"-"`
 	CreatedAt string `json:"created_at"`
 }
 
@@ -292,6 +294,7 @@ func parse(m *imap.Message, section *imap.BodySectionName) (Email, error) {
 	if err != nil {
 		return e, err
 	}
+	e.Automated = isAutomated(mr.Header.Get("Auto-Submitted"), mr.Header.Get("Precedence"), mr.Header.Get("List-Id"), mr.Header.Get("X-Autoreply"), e.From)
 	var plain, html string
 	var attachments []string
 	for {
@@ -365,6 +368,34 @@ func (s *Service) Get(id int64) (Email, error) {
 	err := s.st.DB.QueryRow(`SELECT id, direction, COALESCE(message_id,''), COALESCE(in_reply_to,''), COALESCE(from_addr,''), COALESCE(to_addr,''), COALESCE(cc,''), COALESCE(subject,''), COALESCE(body,''), COALESCE(run_id,''), created_at FROM emails WHERE id = ?`, id).
 		Scan(&e.ID, &e.Direction, &e.MessageID, &e.InReplyTo, &e.From, &e.To, &e.Cc, &e.Subject, &e.Body, &e.RunID, &e.CreatedAt)
 	return e, err
+}
+
+// isAutomated spots mail that must never get an automatic answer
+// (RFC 3834 auto-replies, bounces, mailing lists, no-reply senders).
+func isAutomated(autoSubmitted, precedence, listID, xAutoreply, from string) bool {
+	if a := strings.ToLower(strings.TrimSpace(autoSubmitted)); a != "" && a != "no" {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(precedence)) {
+	case "bulk", "list", "junk", "auto_reply":
+		return true
+	}
+	if strings.TrimSpace(listID) != "" || strings.TrimSpace(xAutoreply) != "" {
+		return true
+	}
+	addr := strings.ToLower(ExtractAddress(from))
+	for _, p := range []string{"mailer-daemon@", "postmaster@", "noreply", "no-reply", "do-not-reply", "donotreply", "bounce"} {
+		if strings.Contains(addr, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// AutoRepliesTo counts the emails sent to addr in the last 24 hours.
+func (s *Service) AutoRepliesTo(addr string) int {
+	return s.st.Count(`SELECT COUNT(*) FROM emails WHERE direction = 'out' AND lower(to_addr) LIKE ? AND created_at >= ?`,
+		"%"+strings.ToLower(addr)+"%", time.Now().Add(-24*time.Hour).UTC().Format(time.RFC3339))
 }
 
 // ExtractAddress pulls the bare address out of "Name <addr>".

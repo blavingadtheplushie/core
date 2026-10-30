@@ -8,8 +8,11 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - blavingad-data:/data           # DB, memory, self-built binaries, its source code
-      - blavingad-workspace:/workspace # its projects and files
+      # ":Z" relabels the volumes for this container on SELinux hosts (Fedora,
+      # RHEL + podman); without it, a recreated container may be denied its
+      # own files. Harmless elsewhere.
+      - blavingad-data:/data:Z           # DB, memory, self-built binaries, its source code
+      - blavingad-workspace:/workspace:Z # its projects and files
       # Lets BLAVINGAD deploy containers on the host.
       # ⚠️ Grants root access to the host: remove this line if you don't want Docker deploys.
       - /var/run/docker.sock:/var/run/docker.sock

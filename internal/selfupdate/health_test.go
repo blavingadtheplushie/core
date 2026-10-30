@@ -57,3 +57,43 @@ func TestEnsureWritableRelocates(t *testing.T) {
 		t.Errorf("healthy tree produced a notice: %q", n)
 	}
 }
+
+// A tree the process can't even read (e.g. labeled for another container
+// by SELinux) is rebuilt from the image seed.
+func TestEnsureWritableReseedsUnreadableTree(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads everything")
+	}
+	data := t.TempDir()
+	src := filepath.Join(data, "src")
+	os.MkdirAll(src, 0o755)
+	os.WriteFile(filepath.Join(src, "go.mod"), []byte("module old\n"), 0o644)
+	seed := t.TempDir()
+	os.WriteFile(filepath.Join(seed, "go.mod"), []byte("module seed\n"), 0o444)
+	os.Chmod(src, 0o000)
+	t.Cleanup(func() { os.Chmod(src, 0o755) })
+
+	t.Setenv("DATA_DIR", data)
+	t.Setenv("SOURCE_DIR", "")
+	os.Unsetenv("SOURCE_DIR")
+	t.Setenv("HOME", t.TempDir())
+	cfg := config.Load()
+	st, _ := store.Open(t.TempDir())
+	m := NewManager(cfg, st, core.NewBus(), "test")
+	if err := m.EnsureSource(seed); err == nil || !strings.Contains(err.Error(), "unreadable") {
+		t.Fatalf("an unreadable tree must be reported, not overwritten: %v", err)
+	}
+	notice := m.EnsureWritable(context.Background())
+	if !strings.Contains(notice, "rebuilt a fresh source tree") || cfg.SourceDir == src {
+		t.Fatalf("notice = %q, dir = %s", notice, cfg.SourceDir)
+	}
+	if b, _ := os.ReadFile(filepath.Join(cfg.SourceDir, "go.mod")); string(b) != "module seed\n" {
+		t.Errorf("not seeded: %q", b)
+	}
+	if !CheckWritable(cfg.SourceDir).Writable {
+		t.Error("the seeded copy must be writable (attributes must not be preserved)")
+	}
+	if _, err := os.Stat(filepath.Join(cfg.SourceDir, ".git")); err != nil {
+		t.Error("the fresh tree must be a git repo")
+	}
+}

@@ -188,7 +188,11 @@ ADMIN_PASSWORD=dev DATA_DIR=/tmp/blv WORKSPACE_DIR=/tmp/blv/ws LLM_BASE_URL=… 
   is writable; it repairs ownership/modes (root) or copies the tree to
   `/data/src-<timestamp>` and records it in `/data/source.path`, which
   `config.Load` follows when `SOURCE_DIR` is unset. Never hardcode `/data/src`:
-  use `cfg.SourceDir`.
+  use `cfg.SourceDir`. If the old tree can't even be read (SELinux label of
+  another container), it is rebuilt from `SELF_REPO` or `SEED_DIR` instead.
+  Never copy into the volume with `cp -a`/`--preserve`: files from the image
+  carry the current container's SELinux categories and become unreadable once
+  the container is recreated. Use `cp -r --no-preserve=all`.
 - A tool denied by the access profile emits a `tool_denied` progress event (🚫
   line in Slack and the web chat): keep it, it is how people tell an access rule
   from a real permission error.

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -28,6 +29,7 @@ type Manager struct {
 	Version string
 	mu      sync.Mutex
 	restart chan string
+	seedDir string
 }
 
 type pending struct {
@@ -93,10 +95,14 @@ func (m *Manager) ConfigureGit() {
 
 // EnsureSource makes sure the agent has a git checkout of its own code.
 func (m *Manager) EnsureSource(seedDir string) error {
+	m.seedDir = seedDir
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	src := m.cfg.SourceDir
-	if _, err := os.Stat(filepath.Join(src, "go.mod")); err != nil {
+	if _, err := os.Stat(filepath.Join(src, "go.mod")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		// There but unreadable: EnsureWritable deals with it.
+		return fmt.Errorf("source unreadable: %w", err)
+	} else if err != nil {
 		os.MkdirAll(filepath.Dir(src), 0o755)
 		cloned := false
 		if m.cfg.SelfRepo != "" && m.cfg.GitHubToken != "" {
@@ -113,9 +119,13 @@ func (m *Manager) EnsureSource(seedDir string) error {
 			if _, err := os.Stat(seedDir); err != nil {
 				return fmt.Errorf("no source to copy (%s)", seedDir)
 			}
-			if out, err := run(ctx, "", nil, "cp", "-a", seedDir+"/.", src); err != nil {
+			// Never preserve attributes: the image's files carry the SELinux
+			// label of the container that ran the first boot, and a
+			// recreated container (new MCS categories) couldn't read them.
+			if out, err := run(ctx, "", nil, "cp", "-r", "--no-preserve=all", seedDir+"/.", src); err != nil {
 				return fmt.Errorf("copying the source: %s", out)
 			}
+			run(ctx, "", nil, "chmod", "-R", "u+rwX", src)
 		}
 	}
 	seeded := false

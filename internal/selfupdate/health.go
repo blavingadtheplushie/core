@@ -81,6 +81,10 @@ func CheckWritable(dir string) WriteCheck {
 		if d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
+		// Git writes its objects read-only on purpose and never edits them.
+		if d.IsDir() && d.Name() == "objects" && filepath.Base(filepath.Dir(p)) == ".git" {
+			return filepath.SkipDir
+		}
 		if aerr := syscall.Access(p, 2 /* W_OK */); aerr != nil {
 			if c.Writable {
 				c.Example, c.Cause = p, diagnose(p, aerr)
@@ -136,17 +140,27 @@ func (m *Manager) EnsureWritable(ctx context.Context) string {
 	fresh := filepath.Join(m.cfg.DataDir, "src-"+time.Now().UTC().Format("20060102-150405"))
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
+	if os.Getenv("SOURCE_DIR") != "" {
+		return m.writeProblem(dir, check, "SOURCE_DIR is set explicitly, so I won't switch directories on my own")
+	}
+	how := "copied it to"
 	if out, err := run(ctx, "", nil, "cp", "-r", "--no-preserve=all", dir+"/.", fresh); err != nil {
+		// The old tree can't even be read (typically the SELinux label of
+		// another container): start over from SELF_REPO or the image.
 		os.RemoveAll(fresh)
-		return m.writeProblem(dir, check, "copying it to a fresh directory failed too: "+truncate(out, 300))
+		old := m.cfg.SourceDir
+		m.cfg.SourceDir = fresh
+		if serr := m.EnsureSource(m.seedDir); serr != nil {
+			m.cfg.SourceDir = old
+			os.RemoveAll(fresh)
+			return m.writeProblem(dir, check, "copying it failed ("+truncate(out, 200)+") and so did a fresh checkout: "+serr.Error())
+		}
+		m.cfg.SourceDir = old
+		how = "can't even read it, so I rebuilt a fresh source tree (from " + map[bool]string{true: "SELF_REPO", false: "the image"}[m.cfg.SelfRepo != "" && m.cfg.GitHubToken != ""] + ") in"
 	}
 	if !CheckWritable(fresh).Writable {
 		os.RemoveAll(fresh)
 		return m.writeProblem(dir, check, "even a fresh copy inside the data volume is not writable — the volume itself is the problem")
-	}
-	if os.Getenv("SOURCE_DIR") != "" {
-		os.RemoveAll(fresh)
-		return m.writeProblem(dir, check, "SOURCE_DIR is set explicitly, so I won't switch directories on my own")
 	}
 	if err := os.WriteFile(SourcePointer(m.cfg.DataDir), []byte(fresh), 0o644); err != nil {
 		os.RemoveAll(fresh)
@@ -155,7 +169,7 @@ func (m *Manager) EnsureWritable(ctx context.Context) string {
 	m.cfg.SourceDir = fresh
 	run(ctx, fresh, nil, "git", "config", "--global", "--add", "safe.directory", fresh)
 	slog.Info("source dir relocated", "from", dir, "to", fresh)
-	return fmt.Sprintf("🔧 I couldn't write to my source directory %s (%s). I copied it to %s and now work from there — nothing to do on your side. The old copy can be deleted.", dir, check.Cause, fresh)
+	return fmt.Sprintf("🔧 I couldn't write to my source directory %s (%s). I %s %s and now work from there — nothing to do on your side. The old copy can be deleted.", dir, check.Cause, how, fresh)
 }
 
 func (m *Manager) writeProblem(dir string, c WriteCheck, why string) string {

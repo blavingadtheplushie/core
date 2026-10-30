@@ -428,11 +428,6 @@ func (b *Bot) onJoin(ctx context.Context, ev *slackevents.MemberJoinedChannelEve
 		}
 		go b.runner.DigestChannel(context.Background(), ev.Channel)
 	}
-	hello := fmt.Sprintf("👋 Hey #%s! I'm *%s*, your resident AI agent.", name, b.cfg.AgentName)
-	b.API.PostMessageContext(ctx, ev.Channel, slack.MsgOptionText(hello, false), slack.MsgOptionBlocks(
-		section(hello+"\nI read what happens here to keep context. Mention me (<@"+b.BotUserID+">) whenever you need a hand: research, code, deploys, emails… 🚀"),
-		contextLine("🔎 web  ·  💻 code  ·  🚀 deploy  ·  📬 email  ·  🧠 memory  ·  🧬 self-improving"),
-	))
 }
 
 func (b *Bot) digestLoop(ctx context.Context) {

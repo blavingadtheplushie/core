@@ -39,6 +39,9 @@ func encode(t *testing.T, blocks []slack.Block) (string, []planJSON) {
 			if v.Text != nil && len(v.Text.Text) > 3000 {
 				t.Errorf("section text %d chars (max 3000)", len(v.Text.Text))
 			}
+			if !v.Expand {
+				t.Errorf("section blocks must set expand=true (no \"Show more\")")
+			}
 		case *slack.ContextBlock:
 			if n := len(v.ContextElements.Elements); n == 0 || n > 10 {
 				t.Errorf("context with %d elements", n)

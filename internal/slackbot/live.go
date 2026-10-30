@@ -68,7 +68,11 @@ func plain(text string) *slack.TextBlockObject {
 	return slack.NewTextBlockObject(slack.PlainTextType, text, true, false)
 }
 
-func section(text string) slack.Block { return slack.NewSectionBlock(mrkdwn(text), nil, nil) }
+// section renders answer text. expand=true stops Slack from folding long
+// text behind "Show more" (notably in AI-app threads).
+func section(text string) slack.Block {
+	return slack.NewSectionBlock(mrkdwn(text), nil, nil, slack.SectionBlockOptionExpand(true))
+}
 
 func contextLine(texts ...string) slack.Block {
 	var els []slack.MixedElement

@@ -179,8 +179,12 @@ cat > "$TMP/provision.sh" <<'PROVISION'
 set -euo pipefail
 . /root/provision.env
 rm -f /root/provision.env
+# pct exec passes a minimal PATH and the host session's locale: set both.
+export PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export LANG=C.UTF-8 LC_ALL=C.UTF-8
 export DEBIAN_FRONTEND=noninteractive
 say() { printf '\033[1;36m  ->\033[0m %s\n' "$*"; }
+die() { printf '\033[1;31m  xx\033[0m %s\n' "$*" >&2; exit 1; }
 ARCH=$(dpkg --print-architecture)
 . /etc/os-release
 
@@ -226,8 +230,14 @@ say "Node.js 22, wrangler, Bitwarden CLI, bun"
 NARCH=$(echo "$ARCH" | sed 's/amd64/x64/')
 NFILE=$(curl -fsSL https://nodejs.org/dist/latest-v22.x/SHASUMS256.txt | awk "/linux-${NARCH}.tar.xz/ {print \$2}")
 curl -fsSL "https://nodejs.org/dist/latest-v22.x/${NFILE}" | tar -xJ -C /usr/local --strip-components=1
-npm install -g -q wrangler @bitwarden/cli && npm cache clean --force >/dev/null 2>&1
+npm install -g -q wrangler @bitwarden/cli
+npm cache clean --force >/dev/null 2>&1 || true
 curl -fsSL https://bun.sh/install | BUN_INSTALL=/usr/local bash >/dev/null
+hash -r
+for tool in go node npm wrangler bw bun git gh; do
+  command -v "$tool" >/dev/null || die "$tool is missing after the install"
+done
+say "go $(go env GOVERSION) · node $(node --version) · bw $(bw --version)"
 
 say "Source code"
 SEED=/opt/blavingad/src

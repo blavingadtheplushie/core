@@ -819,6 +819,12 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, 400, "iterations must be between 1 and 100")
 				return
 			}
+		case "bot_reply_limit":
+			n, err := strconv.Atoi(val)
+			if err != nil || n < 0 || n > 200 {
+				writeErr(w, 400, "bot reply limit must be between 0 and 200")
+				return
+			}
 		case "self_review_cron":
 			if _, err := scheduler.Next(val, "", time.Now(), s.cfg.Timezone); err != nil {
 				writeErr(w, 400, "invalid cron")

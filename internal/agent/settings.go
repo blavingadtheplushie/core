@@ -25,9 +25,12 @@ type Settings struct {
 	HomeChannel    string  `json:"home_channel"`
 	ChannelDigest  bool    `json:"channel_digest"`
 	ExtraPrompt    string  `json:"extra_prompt"`
+	// BotReplyLimit caps consecutive bot messages answered in one thread
+	// until a human writes again (0 = never answer other bots).
+	BotReplyLimit int `json:"bot_reply_limit"`
 }
 
-var SettingKeys = []string{"api_style", "base_url", "model", "fast_model", "temperature", "max_iterations", "reflection", "self_review", "self_review_cron", "follow_threads", "email_auto", "email_profile", "home_channel", "channel_digest", "extra_prompt"}
+var SettingKeys = []string{"api_style", "base_url", "model", "fast_model", "temperature", "max_iterations", "reflection", "self_review", "self_review_cron", "follow_threads", "email_auto", "email_profile", "home_channel", "channel_digest", "extra_prompt", "bot_reply_limit"}
 
 func LoadSettings(st *store.Store, cfg *config.Config) Settings {
 	get := func(k, def string) string { return st.GetSetting("agent."+k, def) }
@@ -42,6 +45,10 @@ func LoadSettings(st *store.Store, cfg *config.Config) Settings {
 	iters, err := strconv.Atoi(get("max_iterations", ""))
 	if err != nil || iters <= 0 {
 		iters = 30
+	}
+	botLimit, err := strconv.Atoi(get("bot_reply_limit", ""))
+	if err != nil || botLimit < 0 {
+		botLimit = 10
 	}
 	return Settings{
 		APIStyle:       get("api_style", cfg.LLMStyle),
@@ -59,5 +66,6 @@ func LoadSettings(st *store.Store, cfg *config.Config) Settings {
 		HomeChannel:    get("home_channel", cfg.SlackHomeChannel),
 		ChannelDigest:  b("channel_digest", true),
 		ExtraPrompt:    get("extra_prompt", ""),
+		BotReplyLimit:  botLimit,
 	}
 }

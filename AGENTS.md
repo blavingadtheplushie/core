@@ -209,6 +209,12 @@ ADMIN_PASSWORD=dev DATA_DIR=/tmp/blv WORKSPACE_DIR=/tmp/blv/ws LLM_BASE_URL=… 
   Never copy into the volume with `cp -a`/`--preserve`: files from the image
   carry the current container's SELinux categories and become unreadable once
   the container is recreated. Use `cp -r --no-preserve=all`.
+- Other bots (`bot_id` set) are always indexed but only answered by
+  `onBotMessage`: explicit mention required, sender must be *explicitly*
+  whitelisted (the default profile never applies to bots), and at most
+  `bot_reply_limit` (setting, default 10, 0 = ignore bots) bot messages per
+  thread since the last human message (`botStreak`). Keep all three guards:
+  they prevent bot-to-bot loops and privilege escalation.
 - A tool denied by the access profile emits a `tool_denied` progress event (🚫
   line in Slack and the web chat): keep it, it is how people tell an access rule
   from a real permission error.

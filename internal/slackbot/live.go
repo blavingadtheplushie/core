@@ -379,11 +379,15 @@ func (l *liveMessage) legacyFinal(res agent.Result, chunks []string) []slack.Blo
 
 // ---------- finish ----------
 
+// finalChunkSize caps the text of one final section block (Slack limit is 3000).
+// Slack folds long text blocks behind "Show more", so keep sections short.
+const finalChunkSize = 1200
+
 // finish replaces the live layout with the answer and returns the ts of
 // the message carrying the plan (the one to update after reflection).
 func (l *liveMessage) finish(ctx context.Context, res agent.Result) string {
 	close(l.stop)
-	chunks := Chunk(ToMrkdwn(res.Output), 2900)
+	chunks := Chunk(ToMrkdwn(res.Output), finalChunkSize)
 	if len(chunks) == 0 {
 		chunks = []string{"🤷"}
 	}

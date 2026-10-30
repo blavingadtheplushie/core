@@ -63,7 +63,23 @@ func (s *Service) Address() string { return s.cfg.EmailFrom }
 
 // ---------- outbound ----------
 
-func (s *Service) Send(ctx context.Context, to, cc []string, subject, body, inReplyTo string) (Email, error) {
+// Attachment is a file attached to an outgoing email.
+type Attachment struct {
+	Name        string
+	ContentType string
+	Data        []byte
+}
+
+func writeBase64(buf *bytes.Buffer, data []byte) {
+	enc := base64.StdEncoding.EncodeToString(data)
+	for len(enc) > 76 {
+		buf.WriteString(enc[:76] + "\r\n")
+		enc = enc[76:]
+	}
+	buf.WriteString(enc + "\r\n")
+}
+
+func (s *Service) Send(ctx context.Context, to, cc []string, subject, body, inReplyTo string, atts ...Attachment) (Email, error) {
 	if !s.cfg.SMTPConfigured() {
 		return Email{}, errors.New("SMTP is not configured")
 	}
@@ -93,16 +109,31 @@ func (s *Service) Send(ctx context.Context, to, cc []string, subject, body, inRe
 		header("References", inReplyTo)
 	}
 	header("MIME-Version", "1.0")
-	header("Content-Type", `text/plain; charset="utf-8"`)
-	header("Content-Transfer-Encoding", "base64")
 	header("X-Mailer", "BLAVINGAD")
-	buf.WriteString("\r\n")
-	enc := base64.StdEncoding.EncodeToString([]byte(body))
-	for len(enc) > 76 {
-		buf.WriteString(enc[:76] + "\r\n")
-		enc = enc[76:]
+	if len(atts) == 0 {
+		header("Content-Type", `text/plain; charset="utf-8"`)
+		header("Content-Transfer-Encoding", "base64")
+		buf.WriteString("\r\n")
+		writeBase64(&buf, []byte(body))
+	} else {
+		bnd := make([]byte, 16)
+		rand.Read(bnd)
+		boundary := "blv-" + hex.EncodeToString(bnd)
+		header("Content-Type", fmt.Sprintf(`multipart/mixed; boundary="%s"`, boundary))
+		buf.WriteString("\r\n")
+		fmt.Fprintf(&buf, "--%s\r\nContent-Type: text/plain; charset=\"utf-8\"\r\nContent-Transfer-Encoding: base64\r\n\r\n", boundary)
+		writeBase64(&buf, []byte(body))
+		for _, a := range atts {
+			ct := a.ContentType
+			if ct == "" {
+				ct = "application/octet-stream"
+			}
+			name := mime.QEncoding.Encode("utf-8", a.Name)
+			fmt.Fprintf(&buf, "--%s\r\nContent-Type: %s; name=\"%s\"\r\nContent-Disposition: attachment; filename=\"%s\"\r\nContent-Transfer-Encoding: base64\r\n\r\n", boundary, ct, name, name)
+			writeBase64(&buf, a.Data)
+		}
+		fmt.Fprintf(&buf, "--%s--\r\n", boundary)
 	}
-	buf.WriteString(enc + "\r\n")
 
 	rcpts := append(append([]string{}, to...), cc...)
 	if err := s.deliver(ctx, rcpts, buf.Bytes()); err != nil {

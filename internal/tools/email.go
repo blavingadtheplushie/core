@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mime"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"blavingad/internal/core"
@@ -20,6 +24,42 @@ func splitAddrs(s []string) []string {
 		}
 	}
 	return out
+}
+
+// loadAttachments reads files to attach. Only the workspace and /tmp are
+// allowed (never the source or data dir, which may hold sensitive files).
+func (d *Deps) loadAttachments(paths []string) ([]mail.Attachment, error) {
+	var out []mail.Attachment
+	total := 0
+	for _, p := range paths {
+		abs, err := d.resolvePath(p)
+		if err != nil {
+			return nil, err
+		}
+		ok := false
+		for _, root := range []string{d.Cfg.WorkspaceDir, "/tmp"} {
+			if root != "" && strings.HasPrefix(abs, filepath.Clean(root)+string(os.PathSeparator)) {
+				ok = true
+			}
+		}
+		if !ok {
+			return nil, fmt.Errorf("attachments must be in the workspace or /tmp: %s", p)
+		}
+		data, err := os.ReadFile(abs)
+		if err != nil {
+			return nil, fmt.Errorf("attachment %s: %w", p, err)
+		}
+		total += len(data)
+		if total > 20<<20 {
+			return nil, fmt.Errorf("attachments exceed 20 MB")
+		}
+		ct := mime.TypeByExtension(filepath.Ext(abs))
+		if ct == "" {
+			ct = http.DetectContentType(data)
+		}
+		out = append(out, mail.Attachment{Name: filepath.Base(abs), ContentType: ct, Data: data})
+	}
+	return out, nil
 }
 
 func registerEmail(d *Deps) {
@@ -107,6 +147,7 @@ func registerEmail(d *Deps) {
 			"cc":      core.StrList("CC (optional)."),
 			"subject": core.Str("Subject."),
 			"body":    core.Str("Message body in plain text."),
+			"attachments": core.StrList("Files to attach (paths in the workspace or /tmp, optional, 20 MB total max)."),
 		}, "to", "subject", "body"),
 		Summarize: func(args json.RawMessage) string {
 			a, _ := core.Parse[struct {
@@ -119,8 +160,13 @@ func registerEmail(d *Deps) {
 			a, _ := core.Parse[struct {
 				To, Cc        []string
 				Subject, Body string
+				Attachments   []string
 			}](args)
-			e, err := d.Mail.Send(ctx, splitAddrs(a.To), splitAddrs(a.Cc), a.Subject, a.Body, "")
+			atts, err := d.loadAttachments(a.Attachments)
+			if err != nil {
+				return "", err
+			}
+			e, err := d.Mail.Send(ctx, splitAddrs(a.To), splitAddrs(a.Cc), a.Subject, a.Body, "", atts...)
 			if err != nil {
 				return "", err
 			}

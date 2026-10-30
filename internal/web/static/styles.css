@@ -748,7 +748,9 @@ table.data td.num, table.data th.num { text-align: right; font-variant-numeric: 
 }
 .modal-head h2 { font-size: 23px; letter-spacing: -.03em; }
 .modal-head p { font-size: 12px; color: var(--ink2); margin-top: 4px; }
-.modal-body { padding: 20px 22px; overflow: auto; flex: 1 1 auto; }
+/* Forms sit between .modal and .modal-body: keep the flex chain so the body scrolls. */
+.modal > form { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+.modal-body { padding: 20px 22px; overflow: auto; flex: 1 1 auto; min-height: 0; overscroll-behavior: contain; }
 .modal-body.flush { padding: 0; }
 .modal-foot {
   padding: 13px 22px;

@@ -235,7 +235,7 @@ func (b *Bot) onMessage(ctx context.Context, ev *slackevents.MessageEvent) {
 					others = true
 				}
 			}
-			respond = !others
+			respond = !others && b.isFollowUp(ev)
 		}
 	}
 	if !respond {
@@ -251,6 +251,42 @@ func (b *Bot) onMessage(ctx context.Context, ev *slackevents.MessageEvent) {
 		files = ev.Message.Files
 	}
 	b.respond(ctx, ev, files, &prof)
+}
+
+// isFollowUp reports whether an unmentioned message in a followed thread is a
+// direct reply to us: the previous message in the thread must be ours, and the
+// last human message before it must come from the same author (so we don't
+// jump in when people talk to each other right after we spoke).
+func (b *Bot) isFollowUp(ev *slackevents.MessageEvent) bool {
+	rows, err := b.st.DB.Query(`SELECT COALESCE(user_id,''), is_bot FROM slack_messages
+		WHERE channel = ? AND (thread_ts = ? OR ts = ?) AND ts < ?
+		ORDER BY CAST(ts AS REAL) DESC LIMIT 20`,
+		ev.Channel, ev.ThreadTimeStamp, ev.ThreadTimeStamp, ev.TimeStamp)
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	first := true
+	for rows.Next() {
+		var uid string
+		var isBot bool
+		if rows.Scan(&uid, &isBot) != nil {
+			return false
+		}
+		ours := uid == b.BotUserID
+		if first {
+			if !ours {
+				return false
+			}
+			first = false
+			continue
+		}
+		if ours || isBot {
+			continue
+		}
+		return uid == ev.User
+	}
+	return !first
 }
 
 // onBotMessage decides whether to answer another bot. Guard rails against

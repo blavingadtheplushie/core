@@ -104,7 +104,11 @@ func registerGitHub(d *Deps) {
 		}, "method", "path"),
 		NeedsApproval: func(args json.RawMessage) bool { return strings.ToUpper(field(args, "method")) != "GET" },
 		Summarize: func(args json.RawMessage) string {
-			return "GitHub " + strings.ToUpper(field(args, "method")) + " " + short(field(args, "path"), 70)
+			s := "GitHub " + strings.ToUpper(field(args, "method")) + " " + short(field(args, "path"), 70)
+			if b := strings.Join(strings.Fields(field(args, "body")), " "); b != "" {
+				s += " · " + short(b, 120)
+			}
+			return s
 		},
 		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
 			a, _ := core.Parse[struct{ Method, Path, Body string }](args)

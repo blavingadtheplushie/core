@@ -256,8 +256,8 @@ func (l *liveMessage) planBlock(title string, extra ...*event) slack.Block {
 	if len(tasks) == 0 {
 		tasks = append(tasks, map[string]any{"task_id": "t1", "title": "💭 Thinking…", "status": "in_progress"})
 	}
-	l.version++
-	return rawBlock{kind: "plan", id: fmt.Sprintf("plan-%s-%d", l.runID, l.version), body: map[string]any{"title": title, "tasks": tasks}}
+	// Stable ID per run: Slack keeps the reflection block open across updates.
+	return rawBlock{kind: "plan", id: fmt.Sprintf("plan-%s", l.runID), body: map[string]any{"title": title, "tasks": tasks}}
 }
 
 func (l *liveMessage) workingBlocks(plan bool) []slack.Block {

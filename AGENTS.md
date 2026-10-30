@@ -179,7 +179,12 @@ ADMIN_PASSWORD=dev DATA_DIR=/tmp/blv WORKSPACE_DIR=/tmp/blv/ws LLM_BASE_URL=… 
   name and no timings: status lives in the message (working layout → final
   layout). Only approval cards have buttons. Once decided, the card is deleted
   and the clicker gets a one-line ephemeral confirmation (`decidedText`);
-  expired cards shrink to a single context line (`resolvedLine`). People stop a run with a 🛑
+  expired cards shrink to a single context line (`resolvedLine`).
+- Every system message (announcements, schedule reports, approvals, ephemeral
+  confirmations, secret reveals) uses the answer layout: a `plan` header with
+  one task, then the body. Build a `core.Notice` and send it with `Bot.Post` /
+  `Announce` / `ephemeralNotice` (`slackbot/notice.go`), never raw text; the
+  classic fallback is applied automatically. No emojis in system messages. People stop a run with a 🛑
   reaction and rate answers with 👍 / 👎 (`onReaction`).
 - The timeline (memories recalled, thoughts, tool calls, reflection) is a
   Slack `plan` block built by hand (`rawBlock` in `live.go`: tasks carry no

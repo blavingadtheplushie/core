@@ -140,9 +140,9 @@ func serve() int {
 		slog.Warn("Slack not configured (SLACK_BOT_TOKEN / SLACK_APP_TOKEN) — web UI only")
 	}
 
-	post := func(channel, thread, text string) {
+	post := func(channel, thread string, n core.Notice) {
 		if bot != nil {
-			bot.Announce(channel, thread, text)
+			bot.Announce(channel, thread, n)
 		}
 	}
 
@@ -160,17 +160,21 @@ func serve() int {
 			Text: fmt.Sprintf("[Scheduled task %q, created by %s]\n%s", sc.Name, sc.CreatedBy, sc.Prompt),
 		})
 		st.DB.Exec(`UPDATE schedules SET last_status = ? WHERE id = ?`, res.Status, sc.ID)
+		n := core.Notice{Title: "Scheduled task", Task: sc.Name, Body: res.Output}
+		if res.Status != "done" {
+			n.Status, n.Detail = "error", "Run ended with status "+res.Status
+		}
 		if sc.Channel != "" && sc.Channel != "web" {
-			post(sc.Channel, sc.ThreadTS, res.Output)
+			post(sc.Channel, sc.ThreadTS, n)
 		} else {
-			post("", "", "⏰ *"+sc.Name+"*\n"+res.Output)
+			post("", "", n)
 		}
 	}
 	sched := scheduler.New(st, cfg.Timezone, runSchedule)
 
 	selfReview := func() {
 		res := runner.SelfReview(ctx)
-		post("", "", "🧬 *Self-improvement review*\n"+res.Output)
+		post("", "", core.Notice{Title: "Self-improvement review", Task: "Review done", Body: res.Output})
 	}
 
 	deps := &tools.Deps{Cfg: cfg, St: st, Mem: mem, LLM: client, Reg: reg, Bus: bus, Mail: ml, Self: self, Sched: sched, Access: access, Vault: vc}
@@ -198,7 +202,7 @@ func serve() int {
 		}
 		if len(changed) > 0 {
 			slog.Info("vault settings changed, restarting", "keys", changed)
-			post("", "", "🔐 Secrets changed in the vault ("+strings.Join(changed, ", ")+"): restarting to apply them. ♻️")
+			post("", "", core.Notice{Title: "Vault", Task: "Secrets changed · restarting", Detail: strings.Join(changed, ", ")})
 			vaultValues, vaultSources = vals, srcs
 			self.RequestRestart("vault: " + strings.Join(changed, ","))
 		}
@@ -210,7 +214,7 @@ func serve() int {
 	if ml != nil {
 		ml.OnIncoming = func(e mail.Email) {
 			s := runner.Settings()
-			note := fmt.Sprintf("📬 New email from *%s* — %q (email #%d)", e.From, e.Subject, e.ID)
+			note := core.Notice{Title: "Email", Task: fmt.Sprintf("New email #%d · %s", e.ID, e.From), Detail: e.Subject}
 			if !s.EmailAuto {
 				post("", "", note)
 				return
@@ -222,7 +226,8 @@ func serve() int {
 					e.ID, cfg.EmailFrom, e.From, e.To, e.Subject, e.Body),
 			})
 			st.DB.Exec(`UPDATE emails SET run_id = ? WHERE id = ?`, res.RunID, e.ID)
-			post("", "", note+"\n"+res.Output)
+			note.Body = res.Output
+			post("", "", note)
 		}
 		go ml.Run(ctx)
 	}
@@ -275,7 +280,7 @@ func serve() int {
 	if sourceNotice != "" {
 		go func() {
 			time.Sleep(5 * time.Second) // let Slack connect
-			post("", "", sourceNotice)
+			post("", "", core.Notice{Title: "Source code", Task: "Notice", Body: sourceNotice})
 		}()
 	}
 	slog.Info("BLAVINGAD is up 🤖", "version", version)

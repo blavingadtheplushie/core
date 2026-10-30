@@ -32,3 +32,22 @@ func TestDecidedText(t *testing.T) {
 		t.Errorf("no tool: got %q", got)
 	}
 }
+
+func TestNoticeBlocks(t *testing.T) {
+	n := core.Notice{Title: "Self-update", Task: "Update applied and stable · abc123", Detail: "feat: x", Body: "hello **world**"}
+	_, plans := encode(t, noticeBlocks(n, true))
+	if len(plans) != 1 || plans[0].Title != "Self-update" || plans[0].Tasks[0].Status != "complete" {
+		t.Fatalf("bad plan: %+v", plans)
+	}
+	legacy := noticeBlocks(n, false)
+	if len(legacy) != 2 {
+		t.Fatalf("legacy: %d blocks", len(legacy))
+	}
+	if got := noticeText(n); got != "Self-update · Update applied and stable · abc123" {
+		t.Fatalf("text %q", got)
+	}
+	r := resolvedNotice(&core.Approval{Status: "expired", Tool: "shell"})
+	if r.Status != "error" || r.Task != "Expired · shell" {
+		t.Fatalf("resolved %+v", r)
+	}
+}

@@ -128,7 +128,7 @@ func richText(text string, pre bool) map[string]any {
 // ---------- progress ----------
 
 func (l *liveMessage) start(ctx context.Context) {
-	opts := []slack.MsgOption{slack.MsgOptionText("🤖 Working on it…", false)}
+	opts := []slack.MsgOption{slack.MsgOptionText("Working on it…", false)}
 	if l.thread != "" {
 		opts = append(opts, slack.MsgOptionTS(l.thread))
 	}
@@ -148,7 +148,7 @@ func (l *liveMessage) start(ctx context.Context) {
 				l.dirty = false
 				l.mu.Unlock()
 				if dirty && l.ts != "" {
-					l.b.send(context.Background(), l.channel, l.ts, func(plan bool) []slack.Block { return l.workingBlocks(plan) }, slack.MsgOptionText("🤖 Working on it…", false))
+					l.b.send(context.Background(), l.channel, l.ts, func(plan bool) []slack.Block { return l.workingBlocks(plan) }, slack.MsgOptionText("Working on it…", false))
 				}
 			}
 		}

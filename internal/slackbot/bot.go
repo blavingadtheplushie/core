@@ -306,7 +306,7 @@ func (b *Bot) history(ctx context.Context, ev *slackevents.MessageEvent) []llm.M
 			continue
 		}
 		if m.User == b.BotUserID || (m.BotID != "" && m.BotID == b.BotID) {
-			if strings.HasPrefix(m.Text, "🤖 Working on it") {
+			if strings.HasPrefix(m.Text, "🤖 Working on it") || strings.HasPrefix(m.Text, "Working on it") {
 				continue
 			}
 			// The visible answer lives in blocks; the text field is only a
@@ -457,38 +457,35 @@ func (b *Bot) digestLoop(ctx context.Context) {
 
 // ---------- outbound helpers ----------
 
-// Post sends a message (converted to mrkdwn) and returns its ts.
-func (b *Bot) Post(ctx context.Context, channel, thread, text string) (string, error) {
+// Post sends a notice (plan header + body) and returns its ts.
+func (b *Bot) Post(ctx context.Context, channel, thread string, n core.Notice) (string, error) {
 	if channel == "" {
 		channel = b.runner.Settings().HomeChannel
 	}
 	if channel == "" {
 		return "", fmt.Errorf("no channel to post to")
 	}
-	var blocks []slack.Block
-	for _, c := range Chunk(ToMrkdwn(text), 2900) {
-		blocks = append(blocks, section(c))
-		if len(blocks) >= 45 {
-			break
-		}
+	fallback := noticeText(n)
+	if n.Body != "" {
+		fallback = short(fallback+" — "+n.Body, 300)
 	}
-	blocks = append(blocks, contextLine("🤖 "+b.cfg.AgentName))
-	opts := []slack.MsgOption{slack.MsgOptionText(short(text, 300), false), slack.MsgOptionBlocks(blocks...)}
+	opts := []slack.MsgOption{slack.MsgOptionText(fallback, false)}
 	if thread != "" {
 		opts = append(opts, slack.MsgOptionTS(thread))
 	}
-	_, ts, err := b.API.PostMessageContext(ctx, channel, opts...)
+	_, ts, err := b.send(ctx, channel, "", func(plan bool) []slack.Block { return noticeBlocks(n, plan) }, opts...)
 	return ts, err
 }
 
-func (b *Bot) Announce(channel, thread, text string) {
+// Announce posts a notice; runs from outside Slack go to the home channel.
+func (b *Bot) Announce(channel, thread string, n core.Notice) {
 	if channel == "" || strings.HasPrefix(channel, "web") {
 		channel, thread = b.runner.Settings().HomeChannel, ""
 	}
 	if channel == "" {
 		return
 	}
-	if _, err := b.Post(context.Background(), channel, thread, text); err != nil {
+	if _, err := b.Post(context.Background(), channel, thread, n); err != nil {
 		slog.Warn("announce failed", "err", err)
 	}
 }

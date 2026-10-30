@@ -37,21 +37,36 @@ func (b *Bot) NotifyApproval(a *core.Approval) (string, string) {
 			who = "Admins or the requester can approve."
 		}
 	}
-	blocks := []slack.Block{
-		section(fmt.Sprintf("✋  *Approval needed*  ·  `%s`\n%s", a.Tool, escape(core.Secrets.Redact(a.Summary)))),
-		section("```" + strings.ReplaceAll(args, "```", "ˋˋˋ") + "```"),
-		contextLine(fmt.Sprintf("👤 Requested for *%s*", escape(a.RequestedBy)), "⏳ Expires in 30 min", "🛡️ "+who),
-		slack.NewActionBlock("approval:"+a.ID,
-			slack.NewButtonBlockElement("approve", a.ID, plain("✅ Approve")).WithStyle(slack.StylePrimary),
-			slack.NewButtonBlockElement("deny", a.ID, plain("❌ Deny")).WithStyle(slack.StyleDanger),
-			slack.NewButtonBlockElement("always", a.ID, plain("♾️ Always allow "+a.Tool)),
-		),
+	summary := core.Secrets.Redact(a.Summary)
+	meta := "Requested for " + a.RequestedBy + " · expires in 30 min · " + who
+	buttons := slack.NewActionBlock("approval:"+a.ID,
+		slack.NewButtonBlockElement("approve", a.ID, plain("Approve")).WithStyle(slack.StylePrimary),
+		slack.NewButtonBlockElement("deny", a.ID, plain("Deny")).WithStyle(slack.StyleDanger),
+		slack.NewButtonBlockElement("always", a.ID, plain("Always allow "+a.Tool)),
+	)
+	build := func(plan bool) []slack.Block {
+		if plan {
+			return []slack.Block{
+				planOf("Approval needed", planTask("t1", a.Tool+" · "+summary, "in_progress", args, meta, true, false)),
+				buttons,
+			}
+		}
+		return []slack.Block{
+			section(fmt.Sprintf("*Approval needed* · `%s`\n%s", a.Tool, escape(summary))),
+			section("```" + strings.ReplaceAll(args, "```", "ˋˋˋ") + "```"),
+			contextLine(escape(meta)),
+			buttons,
+		}
 	}
-	opts := []slack.MsgOption{slack.MsgOptionBlocks(blocks...), slack.MsgOptionText("✋ Approval needed: "+core.Secrets.Redact(a.Summary), false)}
+	opts := []slack.MsgOption{slack.MsgOptionText("Approval needed: "+summary, false)}
 	if thread != "" {
 		opts = append(opts, slack.MsgOptionTS(thread))
 	}
-	ch, ts, err := b.API.PostMessageContext(context.Background(), channel, opts...)
+	ch, ts, err := b.send(context.Background(), channel, "", build, opts...)
+	if err != nil && b.plansOK() {
+		// An approval must never get lost: retry once with the classic card.
+		ch, ts, err = b.API.PostMessageContext(context.Background(), channel, append(opts, slack.MsgOptionBlocks(build(false)...))...)
+	}
 	if err != nil {
 		return "", ""
 	}
@@ -67,9 +82,30 @@ func (b *Bot) ResolveApproval(a *core.Approval, channel, ts string) {
 			return
 		}
 	}
-	line := resolvedLine(a)
-	b.API.UpdateMessageContext(context.Background(), channel, ts,
-		slack.MsgOptionBlocks(contextLine(line)), slack.MsgOptionText(line, false))
+	n := resolvedNotice(a)
+	b.send(context.Background(), channel, ts, func(plan bool) []slack.Block {
+		if !plan {
+			return []slack.Block{contextLine(resolvedLine(a))}
+		}
+		return noticeBlocks(n, true)
+	}, slack.MsgOptionText(noticeText(n), false))
+}
+
+// resolvedNotice is the plan version of resolvedLine.
+func resolvedNotice(a *core.Approval) core.Notice {
+	label, ok := map[string]string{"approved": "Approved", "denied": "Denied", "expired": "Expired"}[a.Status]
+	if !ok {
+		label = a.Status
+	}
+	n := core.Notice{Title: "Approval", Task: label + " · " + a.Tool, Status: "complete"}
+	if a.Status == "expired" {
+		n.Status = "error"
+		n.Detail = "Nobody answered within 30 min."
+	}
+	if a.DecidedBy != "" {
+		n.Detail = "By " + a.DecidedBy
+	}
+	return n
 }
 
 // resolvedLine is the one-line, emoji-free status of a decided approval.
@@ -85,12 +121,8 @@ func resolvedLine(a *core.Approval) string {
 	return line
 }
 
-func (b *Bot) ephemeral(ctx context.Context, cb slack.InteractionCallback, text string) {
-	opts := []slack.MsgOption{slack.MsgOptionText(text, false), slack.MsgOptionBlocks(section(text))}
-	if thread := cb.Message.ThreadTimestamp; thread != "" {
-		opts = append(opts, slack.MsgOptionTS(thread))
-	}
-	b.API.PostEphemeralContext(ctx, cb.Channel.ID, cb.User.ID, opts...)
+func (b *Bot) ephemeral(ctx context.Context, cb slack.InteractionCallback, n core.Notice) {
+	b.ephemeralNotice(ctx, cb.Channel.ID, cb.User.ID, cb.Message.ThreadTimestamp, n)
 }
 
 func (b *Bot) onInteraction(ctx context.Context, cb slack.InteractionCallback) {
@@ -113,14 +145,14 @@ func (b *Bot) decide(ctx context.Context, cb slack.InteractionCallback, act *sla
 		allowed = false // changing a tool policy is an admin decision
 	}
 	if !allowed {
-		b.ephemeral(ctx, cb, "🙅 You're not allowed to decide on this action.")
+		b.ephemeral(ctx, cb, core.Notice{Title: "Approval", Task: "Not allowed", Status: "error", Detail: "Your access profile can't decide on this action."})
 		return
 	}
 	if err := b.approvals.Decide(id, act.ActionID, b.userName(ctx, cb.User.ID)); err != nil {
-		b.ephemeral(ctx, cb, "⚠️ "+err.Error())
+		b.ephemeral(ctx, cb, core.Notice{Title: "Approval", Task: "Not recorded", Status: "error", Detail: err.Error()})
 		return
 	}
-	b.ephemeral(ctx, cb, decidedText(act.ActionID, b.approvals.Tool(id)))
+	b.ephemeral(ctx, cb, core.Notice{Title: "Approval", Task: strings.ReplaceAll(decidedText(act.ActionID, b.approvals.Tool(id)), "`", "")})
 }
 
 // decidedText is the sober ephemeral confirmation sent to whoever clicked.
@@ -191,15 +223,32 @@ func (b *Bot) RevealSecret(rc *core.RunContext, ref, value string) error {
 	if rc.Channel == "" || strings.HasPrefix(rc.Channel, "web") || rc.UserID == "" {
 		return fmt.Errorf("no Slack conversation to send it to")
 	}
-	blocks := []slack.Block{
-		section(fmt.Sprintf("🔐  *%s*  ·  only visible to you", escape(ref))),
-		section("```" + strings.ReplaceAll(value, "```", "ˋˋˋ") + "```"),
-		contextLine("Ephemeral message: it disappears when Slack reloads. Don't paste it into a channel."),
+	note := "Ephemeral message: it disappears when Slack reloads. Don't paste it into a channel."
+	build := func(plan bool) []slack.Block {
+		if plan {
+			return []slack.Block{planOf("Secret · only visible to you", planTask("t1", ref, "complete", note, value, false, true))}
+		}
+		return []slack.Block{
+			section(fmt.Sprintf("*%s* · only visible to you", escape(ref))),
+			section("```" + strings.ReplaceAll(value, "```", "ˋˋˋ") + "```"),
+			contextLine(note),
+		}
 	}
-	opts := []slack.MsgOption{slack.MsgOptionText("🔐 "+ref+" (only visible to you)", false), slack.MsgOptionBlocks(blocks...)}
-	if thread := firstNonEmpty(rc.ThreadTS, rc.MessageTS); thread != "" && !strings.HasPrefix(rc.Channel, "D") {
-		opts = append(opts, slack.MsgOptionTS(thread))
+	thread := firstNonEmpty(rc.ThreadTS, rc.MessageTS)
+	if strings.HasPrefix(rc.Channel, "D") {
+		thread = ""
 	}
-	_, err := b.API.PostEphemeralContext(context.Background(), rc.Channel, rc.UserID, opts...)
+	do := func(plan bool) error {
+		opts := []slack.MsgOption{slack.MsgOptionText(ref+" (only visible to you)", false), slack.MsgOptionBlocks(build(plan)...)}
+		if thread != "" {
+			opts = append(opts, slack.MsgOptionTS(thread))
+		}
+		_, err := b.API.PostEphemeralContext(context.Background(), rc.Channel, rc.UserID, opts...)
+		return err
+	}
+	err := do(b.plansOK())
+	if err != nil && b.plansOK() {
+		err = do(false)
+	}
 	return err
 }

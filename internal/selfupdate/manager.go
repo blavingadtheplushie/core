@@ -466,7 +466,7 @@ func (m *Manager) Rollback(ctx context.Context, rc *core.RunContext, reason stri
 
 // AfterBoot reconciles staged upgrades with what actually happened and
 // returns announcements for the home channel.
-func (m *Manager) AfterBoot(announce func(channel, thread, text string)) {
+func (m *Manager) AfterBoot(announce func(channel, thread string, n core.Notice)) {
 	if b, err := os.ReadFile(m.p.rollback); err == nil {
 		var info RollbackInfo
 		json.Unmarshal(b, &info)
@@ -483,7 +483,7 @@ func (m *Manager) AfterBoot(announce func(channel, thread, text string)) {
 		}
 		lesson := fmt.Sprintf("A self-upgrade was rolled back automatically (%s). Log excerpt:\n%s", info.Reason, truncate(lastLines(info.Log, 25), 2500))
 		m.st.DB.Exec(`INSERT INTO memories(kind, subject, content, importance, source, created_at, updated_at) VALUES('lesson','self-upgrade rolled back',?,4,'supervisor',?,?)`, lesson, store.Now(), store.Now())
-		announce(channel, thread, "🩹 My latest self-improvement crashed on startup, so I rolled back to the previous version.\n> "+info.Reason+"\nI kept the log in memory so I can fix it. 🧠")
+		announce(channel, thread, core.Notice{Title: "Self-update", Task: "Crashed on startup · rolled back", Status: "error", Detail: info.Reason + "\nThe log is saved as a lesson in memory."})
 		return
 	}
 	pb, err := os.ReadFile(filepath.Join(m.p.dir, "pending.json"))
@@ -498,7 +498,7 @@ func (m *Manager) AfterBoot(announce func(channel, thread, text string)) {
 		os.Remove(filepath.Join(m.p.dir, "pending.json"))
 		m.st.DB.Exec(`UPDATE evolutions SET status = 'live' WHERE id = ?`, p.EvolutionID)
 		m.bus.Publish("evolution", map[string]string{"id": p.EvolutionID, "status": "live"})
-		announce(p.Channel, p.ThreadTS, fmt.Sprintf("🧬 Update applied and stable (`%s`): %s ✨", p.Commit, p.Summary))
+		announce(p.Channel, p.ThreadTS, core.Notice{Title: "Self-update", Task: "Update applied and stable · " + p.Commit, Detail: p.Summary})
 	}()
 }
 

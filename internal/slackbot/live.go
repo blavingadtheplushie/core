@@ -395,7 +395,9 @@ func (l *liveMessage) finish(ctx context.Context, res agent.Result) string {
 	if len(chunks) == 0 {
 		chunks = []string{"🤷"}
 	}
-	refl := reflectionEvent(res.Reflecting, false, nil)
+	// The background reflection still runs (memory) but is no longer shown
+	// in the plan: Paul found it noisy.
+	var refl *event
 	// Slack caps a message at 50 blocks: long answers spill over into
 	// follow-up messages; the plan stays on the first one.
 	const perMessage = 40

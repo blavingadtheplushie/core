@@ -110,7 +110,11 @@ func (b *Bot) loop(ctx context.Context) {
 				case *slackevents.MemberJoinedChannelEvent:
 					go b.onJoin(ctx, inner)
 				case *slackevents.AppHomeOpenedEvent:
-					go b.publishHome(ctx, inner.User)
+					if inner.Tab == "messages" {
+						go b.agentWelcome(ctx, inner.Channel)
+					} else {
+						go b.publishHome(ctx, inner.User)
+					}
 				}
 			case socketmode.EventTypeInteractive:
 				b.sm.Ack(*evt.Request)
@@ -343,16 +347,18 @@ func (b *Bot) recentChannel(ctx context.Context, channel, before string) string 
 func (b *Bot) respond(ctx context.Context, ev *slackevents.MessageEvent, files []slack.File, prof *core.Profile) {
 	inThread := ev.ThreadTimeStamp != ""
 	replyThread := ev.ThreadTimeStamp
-	if !inThread && ev.ChannelType != "im" {
+	if !inThread {
+		// Agent messaging experience: every DM message opens its own thread,
+		// like a channel mention.
 		replyThread = ev.TimeStamp
 	}
 	key := ev.Channel + ":" + firstNonEmpty(ev.ThreadTimeStamp, ev.TimeStamp)
-	if ev.ChannelType == "im" && !inThread {
-		key = ev.Channel
-	}
 	l := b.lock(key)
 	l.Lock()
 	defer l.Unlock()
+	if ev.ChannelType == "im" {
+		b.agentThinking(ctx, ev.Channel, replyThread, !inThread, ev.Text)
+	}
 
 	userName := b.userName(ctx, ev.User)
 	text := b.cleanText(ev.Text)

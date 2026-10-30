@@ -6,6 +6,8 @@ display_information:
   description: Your resident AI agent — searches, codes, deploys, remembers, improves itself. 🤖
   background_color: "#2645d6"
 features:
+  agent_view:
+    agent_description: Resident AI agent. Searches, codes, deploys, remembers and improves itself.
   app_home:
     home_tab_enabled: true
     messages_tab_enabled: true
@@ -17,6 +19,7 @@ oauth_config:
   scopes:
     bot:
       - app_mentions:read
+      - assistant:write
       - channels:history
       - channels:join
       - channels:read

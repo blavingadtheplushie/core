@@ -80,7 +80,7 @@ Two ways to run it, same layout (`/data`, `/workspace`, seed in
 | `internal/core` | `Tool`, `Registry`, policies, `RunContext`, event `Bus`, `Approvals`, default persona, **access profiles** (`access.go`) |
 | `internal/agent` | **The harness**: prompt assembly, tool loop, parallel tools, approvals, compaction, sub-agents (`delegate`), reflection, channel digests, self-review |
 | `internal/tools` | All built-in tools + agent-authored custom tools |
-| `internal/slackbot` | Socket Mode, message indexing, Block Kit layouts (`live.go`: working/final message, `blocks.go`: feedback row + reflection update, `interactive.go`: approvals, Stop/feedback buttons, Home tab), mrkdwn |
+| `internal/slackbot` | Socket Mode, agent messaging experience (`agent_view.go`: DM threads, native status, titles, suggested prompts — best-effort, no-op on plain apps), message indexing, Block Kit layouts (`live.go`: working/final message, `blocks.go`: feedback row + reflection update, `interactive.go`: approvals, Stop/feedback buttons, Home tab), mrkdwn |
 | `internal/mail` | IMAP polling + SMTP sending |
 | `internal/cloudflare` | Cloudflare Tunnel API: tunnel lookup/creation, ingress routes (catch-all kept last), proxied DNS CNAMEs |
 | `internal/vault` | Vaultwarden through the Bitwarden CLI: unlock, in-memory cache, `vault://` references, env resolution, save/generate |

@@ -1,0 +1,10 @@
+{
+  "name": "BLAVINGAD",
+  "short_name": "BLAVINGAD",
+  "description": "The dashboard for your Slack AI agent.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#EEF0E9",
+  "theme_color": "#EEF0E9",
+  "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

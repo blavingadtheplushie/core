@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#EEF0E9" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0F161B" media="(prefers-color-scheme: dark)">
+  <meta name="robots" content="noindex">
+  <title>BLAVINGAD — your AI agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=Instrument+Sans:ital,wght@0,400..700;1,400&display=swap" rel="stylesheet">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div id="app">
+    <div class="boot">
+      <div class="boot-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="9" fill="currentColor"/><circle cx="11.5" cy="14" r="2.5" fill="var(--acc-ink)"/><circle cx="20.5" cy="14" r="2.5" fill="var(--acc-ink)"/><path d="M11 20.2c1.4 1.6 3.1 2.4 5 2.4s3.6-.8 5-2.4" fill="none" stroke="var(--acc-ink)" stroke-width="2.4" stroke-linecap="round"/><path d="M16 4.5v3" stroke="var(--acc-ink)" stroke-width="2.2" stroke-linecap="round"/></svg>
+      </div>
+      <span class="boot-text">BLAVINGAD is waking up…</span>
+    </div>
+  </div>
+  <div id="modal-root"></div>
+  <div id="toast-root" class="toast-root" aria-live="polite"></div>
+  <noscript><div class="noscript">The BLAVINGAD dashboard needs JavaScript.</div></noscript>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

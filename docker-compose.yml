@@ -1,0 +1,48 @@
+services:
+  blavingad:
+    build: .
+    image: blavingad:latest
+    container_name: blavingad
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - blavingad-data:/data           # DB, memory, self-built binaries, its source code
+      - blavingad-workspace:/workspace # its projects and files
+      # Lets BLAVINGAD deploy containers on the host.
+      # ⚠️ Grants root access to the host: remove this line if you don't want Docker deploys.
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - apps
+    stop_grace_period: 30s
+
+  # Optional: Traefik to automatically expose deployed apps at
+  # https://<app>.<DEPLOY_DOMAIN>. Uncomment and set DEPLOY_TRAEFIK=true.
+  # traefik:
+  #   image: traefik:v3
+  #   restart: unless-stopped
+  #   command:
+  #     - --providers.docker=true
+  #     - --providers.docker.exposedbydefault=false
+  #     - --providers.docker.network=blavingad-apps
+  #     - --entrypoints.web.address=:80
+  #     - --entrypoints.websecure.address=:443
+  #     - --entrypoints.web.http.redirections.entrypoint.to=websecure
+  #     - --certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web
+  #     - --certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL}
+  #     - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+  #   ports: ["80:80", "443:443"]
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #     - traefik-certs:/letsencrypt
+  #   networks: [apps]
+
+networks:
+  apps:
+    name: blavingad-apps
+
+volumes:
+  blavingad-data:
+  blavingad-workspace:
+  # traefik-certs:

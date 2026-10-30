@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/slack-go/slack"
 
@@ -59,25 +58,39 @@ func (b *Bot) NotifyApproval(a *core.Approval) (string, string) {
 	return ch, ts
 }
 
+// ResolveApproval removes the approval card once it is decided: the decider
+// gets a short ephemeral confirmation instead (see decide). Expired cards, or
+// cards Slack refuses to delete, shrink to one sober context line.
 func (b *Bot) ResolveApproval(a *core.Approval, channel, ts string) {
-	pair, ok := map[string][2]string{"approved": {"✅", "Approved"}, "denied": {"❌", "Denied"}, "expired": {"⌛", "Expired"}}[a.Status]
+	if a.Status == "approved" || a.Status == "denied" {
+		if _, _, err := b.API.DeleteMessageContext(context.Background(), channel, ts); err == nil {
+			return
+		}
+	}
+	line := resolvedLine(a)
+	b.API.UpdateMessageContext(context.Background(), channel, ts,
+		slack.MsgOptionBlocks(contextLine(line)), slack.MsgOptionText(line, false))
+}
+
+// resolvedLine is the one-line, emoji-free status of a decided approval.
+func resolvedLine(a *core.Approval) string {
+	label, ok := map[string]string{"approved": "Approved", "denied": "Denied", "expired": "Expired"}[a.Status]
 	if !ok {
-		pair = [2]string{"•", a.Status}
+		label = a.Status
 	}
-	icon, label := pair[0], pair[1]
-	by := ""
+	line := label + " · `" + a.Tool + "`"
 	if a.DecidedBy != "" {
-		by = " by *" + escape(a.DecidedBy) + "*"
+		line += " · " + escape(a.DecidedBy)
 	}
-	blocks := []slack.Block{
-		section(fmt.Sprintf("%s  *%s*%s  ·  `%s`\n%s", icon, label, by, a.Tool, escape(core.Secrets.Redact(a.Summary)))),
-		contextLine("👤 Requested for "+escape(a.RequestedBy), "🕒 "+time.Now().Format("15:04")),
-	}
-	b.API.UpdateMessageContext(context.Background(), channel, ts, slack.MsgOptionBlocks(blocks...), slack.MsgOptionText(icon+" "+label, false))
+	return line
 }
 
 func (b *Bot) ephemeral(ctx context.Context, cb slack.InteractionCallback, text string) {
-	b.API.PostEphemeralContext(ctx, cb.Channel.ID, cb.User.ID, slack.MsgOptionText(text, false), slack.MsgOptionBlocks(section(text)))
+	opts := []slack.MsgOption{slack.MsgOptionText(text, false), slack.MsgOptionBlocks(section(text))}
+	if thread := cb.Message.ThreadTimestamp; thread != "" {
+		opts = append(opts, slack.MsgOptionTS(thread))
+	}
+	b.API.PostEphemeralContext(ctx, cb.Channel.ID, cb.User.ID, opts...)
 }
 
 func (b *Bot) onInteraction(ctx context.Context, cb slack.InteractionCallback) {
@@ -105,7 +118,24 @@ func (b *Bot) decide(ctx context.Context, cb slack.InteractionCallback, act *sla
 	}
 	if err := b.approvals.Decide(id, act.ActionID, b.userName(ctx, cb.User.ID)); err != nil {
 		b.ephemeral(ctx, cb, "⚠️ "+err.Error())
+		return
 	}
+	b.ephemeral(ctx, cb, decidedText(act.ActionID, b.approvals.Tool(id)))
+}
+
+// decidedText is the sober ephemeral confirmation sent to whoever clicked.
+func decidedText(action, tool string) string {
+	label := "Denied"
+	switch action {
+	case "approve":
+		label = "Approved"
+	case "always":
+		label = "Approved (always allowed from now on)"
+	}
+	if tool == "" {
+		return label
+	}
+	return label + " · `" + tool + "`"
 }
 
 func (b *Bot) publishHome(ctx context.Context, user string) {

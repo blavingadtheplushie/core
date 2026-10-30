@@ -206,6 +206,13 @@ func (a *Approvals) Request(ctx context.Context, rc *RunContext, tool *Tool, arg
 	}
 }
 
+// Tool returns the tool name of an approval ("" if unknown).
+func (a *Approvals) Tool(id string) string {
+	var tool string
+	a.st.DB.QueryRow(`SELECT tool FROM approvals WHERE id = ?`, id).Scan(&tool)
+	return tool
+}
+
 // Decide records a decision. "always" approves and flips the tool policy to
 // auto for future calls.
 func (a *Approvals) Decide(id, decision, by string) error {

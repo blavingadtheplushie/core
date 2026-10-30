@@ -329,6 +329,33 @@ func registerSlack(d *Deps) {
 	})
 
 	d.Reg.Add(&core.Tool{
+		Name: "slack_delete_message", Category: "slack", Emoji: "🗑️", Risk: core.RiskSensitive, Available: ok,
+		Description: "Deletes a Slack message posted by the bot (needs a token with chat:write). Only deletes the message whose channel and timestamp are given.",
+		Params: core.Obj(map[string]any{
+			"channel": core.Str("Channel ID (C…) where the message was posted."),
+			"ts":      core.Str("Timestamp of the message to delete (e.g. 1793325976.730319)."),
+		}, "channel", "ts"),
+		Summarize: summarizeField("Delete message in ", "channel", 40),
+		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
+			a, _ := core.Parse[struct {
+				Channel string `json:"channel"`
+				Ts      string `json:"ts"`
+			}](args)
+			ch, err := d.resolveChannel(ctx, a.Channel)
+			if err != nil {
+				return "", err
+			}
+			if a.Ts == "" {
+				return "", errors.New("missing ts")
+			}
+			if _, _, err := d.Slack.DeleteMessageContext(ctx, ch, a.Ts); err != nil {
+				return "", err
+			}
+			return fmt.Sprintf("Message %s deleted from %s.", a.Ts, ch), nil
+		},
+	})
+
+	d.Reg.Add(&core.Tool{
 		Name: "slack_channels", Category: "slack", Emoji: "📋", Available: ok,
 		Description: "Lists Slack channels (name, ID, members, topic, whether you're a member).",
 		Params:      core.Obj(map[string]any{"query": core.Str("Name filter (optional).")}),

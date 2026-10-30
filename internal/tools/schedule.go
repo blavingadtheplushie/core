@@ -14,6 +14,15 @@ import (
 
 func registerSchedule(d *Deps) {
 	d.Reg.Add(&core.Tool{
+		Name: "current_time", Category: "system", Emoji: "🕒",
+		Description: "Returns the current local date and time (with timezone and UTC offset). Use it whenever you need to know what time or date it is, before scheduling or saying 'today'/'tonight'.",
+		Params:      core.Obj(map[string]any{}),
+		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
+			now := time.Now().In(d.Cfg.Timezone)
+			return fmt.Sprintf("%s (%s, UTC%s)", now.Format("Monday 2 January 2006, 15:04:05"), d.Cfg.Timezone.String(), now.Format("-07:00")), nil
+		},
+	})
+	d.Reg.Add(&core.Tool{
 		Name: "schedule_create", Category: "system", Emoji: "⏰",
 		Description: "Schedules a task for yourself: a one-off reminder or a recurring task (cron). When it fires, you'll receive the `prompt` instruction and can use all your tools; your answer is posted in the given channel (default: the current conversation).",
 		Params: core.Obj(map[string]any{

@@ -227,6 +227,10 @@ ADMIN_PASSWORD=dev DATA_DIR=/tmp/blv WORKSPACE_DIR=/tmp/blv/ws LLM_BASE_URL=… 
 - New secret-bearing setting? Add it to `config.VaultKeys` (and `secretEnv` /
   `SecretValues` if it is a secret) so it can come from the vault, is scrubbed
   and is masked.
+- ElevenLabs TTS (`tools/elevenlabs.go`, category `audio`): `tts_speak` /
+  `tts_voices` read the key from `vault://ELEVENLABS_API_KEY/password` through
+  `resolveRef` (masked, profile-checked) and sync the vault once if it is empty.
+  MP3s land in `$WORKSPACE_DIR/audio/` and are uploaded to the current thread.
 - Any tool parameter that carries a `vault://` reference must make
   `NeedsApproval` return true and resolve through `Deps.secretEnv`/`Deps.expand`
   (which enforce the access profile and register values for masking).

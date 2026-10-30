@@ -58,6 +58,7 @@ func RegisterAll(d *Deps) {
 	registerSchedule(d)
 	registerAccess(d)
 	registerVault(d)
+	registerElevenLabs(d)
 	LoadCustomTools(d)
 }
 

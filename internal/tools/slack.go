@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -382,6 +383,36 @@ func registerSlack(d *Deps) {
 					break
 				}
 				cursor = next
+			}
+			return Clip(b.String(), 0), nil
+		},
+	})
+
+	d.Reg.Add(&core.Tool{
+		Name: "slack_list_emojis", Category: "slack", Emoji: "😀", Available: ok,
+		Description: "Lists the custom emojis of the Slack workspace (names, and aliases). Optional filter by substring. Use it to check which workspace emojis exist before using them.",
+		Params:      core.Obj(map[string]any{"filter": core.Str("Optional substring to filter emoji names (e.g. 'pf', 'sob').")}),
+		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
+			q := strings.ToLower(field(args, "filter"))
+			all, err := d.Slack.GetEmojiContext(ctx)
+			if err != nil {
+				return "", err
+			}
+			names := make([]string, 0, len(all))
+			for name := range all {
+				if q == "" || strings.Contains(strings.ToLower(name), q) {
+					names = append(names, name)
+				}
+			}
+			sort.Strings(names)
+			var b strings.Builder
+			fmt.Fprintf(&b, "%d custom emojis\n", len(names))
+			for _, name := range names {
+				if strings.HasPrefix(all[name], "alias:") {
+					fmt.Fprintf(&b, ":%s: (alias of :%s:)\n", name, strings.TrimPrefix(all[name], "alias:"))
+				} else {
+					fmt.Fprintf(&b, ":%s:\n", name)
+				}
 			}
 			return Clip(b.String(), 0), nil
 		},

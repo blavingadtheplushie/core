@@ -47,6 +47,7 @@ type Deps struct {
 func RegisterAll(d *Deps) {
 	registerWeb(d)
 	registerSlack(d)
+	registerSlackBlocks(d)
 	registerMemory(d)
 	registerFiles(d)
 	registerGitHub(d)

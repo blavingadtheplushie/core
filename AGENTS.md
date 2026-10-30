@@ -177,7 +177,10 @@ ADMIN_PASSWORD=dev DATA_DIR=/tmp/blv WORKSPACE_DIR=/tmp/blv/ws LLM_BASE_URL=… 
   when you change a layout.
 - The bot never adds emoji reactions and answers carry no buttons, no model
   name and no timings: status lives in the message (working layout → final
-  layout). Only approval cards have buttons. Once decided, the card is deleted
+  layout). Only approval cards have buttons — except messages the agent
+  explicitly authors with `slack_post_blocks` (`tools/slack_blocks.go`), whose
+  action_ids are always prefixed `blocks:` so they can never hit a built-in
+  handler (approve/deny/always). Once decided, the card is deleted
   and the clicker gets a one-line ephemeral confirmation (`decidedText`);
   expired cards shrink to a single context line (`resolvedLine`).
 - Every system message (announcements, schedule reports, approvals, ephemeral

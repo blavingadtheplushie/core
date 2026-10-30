@@ -172,7 +172,7 @@ ADMIN_PASSWORD=dev DATA_DIR=/tmp/blv WORKSPACE_DIR=/tmp/blv/ws LLM_BASE_URL=… 
   reaction and rate answers with 👍 / 👎 (`onReaction`).
 - The timeline (memories recalled, thoughts, tool calls, reflection) is a
   Slack `plan` block built by hand (`rawBlock` in `live.go`: tasks carry no
-  `type`, `block_id` changes on every update, max 50 tasks — older ones are
+  `type`, `block_id` is stable for the whole run (`plan-<runID>`) so Slack keeps the block expanded, max 50 tasks — older ones are
   folded). Tool results of the `privateOutput` categories (memory, vault,
   email, access) are never rendered. If Slack answers `invalid_blocks`,
   `Bot.send` sets `noPlans` and falls back to the classic layout for good.

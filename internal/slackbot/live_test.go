@@ -102,8 +102,8 @@ func TestTimelinePlan(t *testing.T) {
 
 	js, plans := encode(t, l.workingBlocks(true))
 	p := plans[0]
-	if p.BlockID == firstID {
-		t.Error("block_id must change on every update")
+	if p.BlockID != firstID {
+		t.Errorf("block_id must stay stable across updates: first %q, now %q", firstID, p.BlockID)
 	}
 	var titles, statuses []string
 	for _, task := range p.Tasks {

@@ -58,6 +58,7 @@ const ICONS = {
   arrowRight: '<path d="M5 12h14M13 5l7 7-7 7"/>',
   arrowLeft: '<path d="M19 12H5M11 19l-7-7 7-7"/>',
   check: '<path d="m4 12 5 5L20 6"/>',
+  lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/>',
   spark: '<path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z"/>',
   refresh: '<path d="M20 11a8 8 0 1 0-2.3 6.3M20 4v7h-7"/>',
@@ -424,7 +425,7 @@ const NAV = [
   ['Workshop', [['dashboard', '#/', 'dashboard', 'Overview'], ['chat', '#/chat', 'chat', 'Chat'], ['runs', '#/runs', 'runs', 'Runs'], ['approvals', '#/approvals', 'hand', 'Approvals']]],
   ['Brain', [['memory', '#/memory', 'brain', 'Memory'], ['tools', '#/tools', 'tool', 'Tools'], ['skills', '#/skills', 'book', 'Persona & skills'], ['evolution', '#/evolution', 'dna', 'Evolution']]],
   ['Actions', [['schedules', '#/schedules', 'clock', 'Tasks'], ['deployments', '#/deployments', 'rocket', 'Deployments'], ['mail', '#/mail', 'mail', 'Mailbox']]],
-  ['System', [['access', '#/access', 'shield', 'Access'], ['audit', '#/audit', 'audit', 'Audit log'], ['settings', '#/settings', 'settings', 'Settings']]],
+  ['System', [['access', '#/access', 'shield', 'Access'], ['vault', '#/vault', 'lock', 'Vault'], ['audit', '#/audit', 'audit', 'Audit log'], ['settings', '#/settings', 'settings', 'Settings']]],
 ];
 
 function renderShell() {
@@ -1375,7 +1376,7 @@ async function renderSettings() {
       </div>
       <div class="row" style="justify-content:flex-end"><button class="btn primary" type="submit">${icon('check', 'btn-icon')} Save settings</button></div>
     </form>
-    <section class="card" style="margin-top:16px"><div class="card-head"><div><h3>🔐 Vaultwarden vault</h3><p>${vs.enabled ? `${esc(vs.url)} · folder <code>${esc(vs.folder)}</code> · ${esc(vs.auth)}` : 'Not configured: set <code>VAULT_URL</code>, <code>VAULT_CLIENT_ID</code>, <code>VAULT_CLIENT_SECRET</code> and <code>VAULT_MASTER_PASSWORD</code>.'}</p></div>${vs.enabled ? `<div class="row">${vs.unlocked ? badge('unlocked', 'ok') : badge('unavailable', 'bad')}<button class="btn sm" type="button" data-action="vault-sync">${icon('refresh', 'btn-icon')} Sync</button></div>` : ''}</div>
+    <section class="card" style="margin-top:16px"><div class="card-head"><div><h3>🔐 Vaultwarden vault</h3><p>${vs.enabled ? `${esc(vs.url)} · folder <code>${esc(vs.folder)}</code> · ${esc(vs.auth)}` : 'Not configured: set <code>VAULT_URL</code>, <code>VAULT_CLIENT_ID</code>, <code>VAULT_CLIENT_SECRET</code> and <code>VAULT_MASTER_PASSWORD</code>.'}</p></div>${vs.enabled ? `<div class="row">${vs.unlocked ? badge('unlocked', 'ok') : badge('unavailable', 'bad')}<a class="btn sm" href="#/vault">Manage items</a><button class="btn sm" type="button" data-action="vault-sync">${icon('refresh', 'btn-icon')} Sync</button></div>` : ''}</div>
       ${vs.enabled ? `<div class="card-body">
         ${vs.error ? `<div class="auth-error">⚠️ ${esc(vs.error)}</div>` : ''}
         <dl class="kv" style="margin-bottom:14px"><dt>Items</dt><dd>${fmtNum(vs.items)}</dd><dt>New items go to</dt><dd>${esc(vs.writes || '—')}</dd><dt>Last sync</dt><dd>${esc(vs.last_sync ? relative(vs.last_sync) : '—')} <span class="muted tiny">(auto every 15 min)</span></dd><dt>Masked secrets</dt><dd>${fmtNum(vault.masked)} value${vault.masked === 1 ? '' : 's'} replaced with •••••• everywhere</dd></dl>
@@ -1457,6 +1458,85 @@ async function testModel(button) {
 /* ---------- Access ---------- */
 const MEMORY_MODES = { full: ['🧠', 'Full', 'reads and remembers'], read: ['👀', 'Read-only', 'relies on memory without remembering anything'], none: ['🫥', 'None', 'no recall, no memorizing'] };
 const APPROVE_MODES = { any: 'Approves anything', own: 'Approves own requests', none: 'Approves nothing' };
+
+/* ---------- Vault ---------- */
+// Write-only by design: values are never sent to the browser. You can see
+// which fields exist, replace them, add or remove fields, and delete items.
+async function renderVault() {
+  const seq = ++state.routeSeq;
+  setNav('vault');
+  setCrumbs('Vault');
+  const view = document.getElementById('view');
+  let data;
+  try { data = await api(`/vault/items?${new URLSearchParams({ q: state.vaultSearch || '' })}`); } catch (error) {
+    view.innerHTML = `${pageHead('Vault', 'Vaultwarden items used by the agent.', '', 'System')}${errorState(error.message)}`; return;
+  }
+  if (seq !== state.routeSeq) return;
+  state.cache.vault = data;
+  const vs = data.status || {};
+  const items = [...(data.items || [])].sort((a, b) => a.name.localeCompare(b.name));
+  const flags = (it) => [it.has_password ? 'password' : '', it.has_totp ? 'totp' : '', it.has_notes ? 'notes' : '', ...(it.fields || [])].filter(Boolean);
+  view.innerHTML = `${pageHead('Vault', `Items in Vaultwarden (${esc(vs.url || '')}). Values are write-only here: you can replace them, never read them. New items go to ${esc(vs.writes || 'the personal vault')}, folder <code>${esc(data.folder || '')}</code>.`, `<button class="btn" data-action="vault-sync-page">${icon('refresh', 'btn-icon')} Sync</button><button class="btn primary" data-action="vault-new">${icon('plus', 'btn-icon')} New item</button>`, 'System')}
+    <section class="card"><div class="card-head"><div><h3>${fmtNum(items.length)} item${items.length === 1 ? '' : 's'}</h3><p>${vs.unlocked ? `Last sync ${esc(vs.last_sync ? relative(vs.last_sync) : '—')}` : esc(vs.error || 'Vault locked')}</p></div>
+      <input class="input sm" id="vault-search" type="search" placeholder="Search…" value="${esc(state.vaultSearch || '')}" style="max-width:220px" aria-label="Search the vault"></div>
+      <div class="card-body flush">${items.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Name</th><th>Type</th><th>Where</th><th>Fields</th><th>Reference</th><th></th></tr></thead><tbody>${items.map((it) => `
+        <tr><td><div class="link-title">${esc(it.name)}</div>${it.username || it.uri ? `<div class="link-target">${esc([it.username, it.uri].filter(Boolean).join(' · '))}</div>` : ''}</td>
+        <td class="small nowrap">${esc(it.type || '—')}</td>
+        <td class="small">${esc([it.folder, ...(it.collections || [])].filter(Boolean).join(' · ') || '—')}</td>
+        <td class="small">${flags(it).map((f) => `<code class="small">${esc(f)}</code>`).join(' ') || '—'}</td>
+        <td><button class="btn xs ghost" data-action="copy-text" data-text="${esc(it.reference)}" title="Copy the reference">${icon('copy', 'btn-icon')} <code class="small">${esc(truncate(it.reference, 36))}</code></button></td>
+        <td class="actions"><div class="action-row"><button class="icon-btn" data-action="vault-edit" data-id="${esc(it.id)}" aria-label="Edit" title="Edit">${icon('edit')}</button><button class="icon-btn danger" data-action="vault-delete" data-id="${esc(it.id)}" aria-label="Delete" title="Delete">${icon('trash')}</button></div></td></tr>`).join('')}</tbody></table></div>`
+        : emptyState(state.vaultSearch ? 'No match' : 'Empty vault', state.vaultSearch ? 'Try another search.' : 'Create an item, or ask the agent to store a token with vault_save.', state.vaultSearch ? '' : '<button class="btn primary" data-action="vault-new">New item</button>')}</div></section>
+    <p class="hint" style="margin-top:12px">An item named after a setting (e.g. <code>CLOUDFLARE_API_TOKEN</code>) in the <code>${esc(data.folder || '')}</code> folder provides it: saving one triggers a sync, and a restart if the value changed.</p>`;
+}
+
+function vaultFieldRow(name = '', existing = false) {
+  return `<div class="row wrap vault-field" style="gap:8px;margin-bottom:8px">
+    <input class="input sm mono" name="fname" value="${esc(name)}" placeholder="field name" ${existing ? 'readonly data-existing="1"' : ''} style="width:170px" aria-label="Field name">
+    <input class="input sm mono" name="fvalue" type="password" autocomplete="new-password" placeholder="${existing ? 'new value (empty = keep)' : 'value'}" style="flex:1;min-width:150px" aria-label="Field value">
+    ${existing ? `<label class="check-row small"><input type="checkbox" name="fremove" value="${esc(name)}"> remove</label>` : '<button class="icon-btn danger" type="button" data-action="vault-field-drop" aria-label="Remove row" title="Remove">' + icon('x') + '</button>'}
+  </div>`;
+}
+
+function vaultModal(id = '') {
+  const it = id ? (state.cache.vault?.items || []).find((x) => x.id === id) : null;
+  const note = it ? it.type === 'secure note' : false;
+  const cols = state.cache.vault?.collections || [];
+  showModal(`${modalHead(it ? `Edit “${it.name}”` : 'New vault item', it ? 'Empty inputs keep the current value. Current secrets are never shown.' : 'Stored in Vaultwarden; the agent only ever uses it by reference.')}
+    <form id="vault-form" data-id="${esc(id)}" autocomplete="off"><div class="modal-body"><div class="form-grid">
+      <div class="field"><label class="label" for="vi-name">Name</label><input class="input mono" id="vi-name" name="name" required value="${esc(it?.name || '')}" placeholder="CLOUDFLARE_API_TOKEN" autofocus></div>
+      <div class="field"><label class="label" for="vi-kind">Type</label>${it ? `<input class="input" id="vi-kind" value="${esc(it.type)}" readonly><input type="hidden" name="kind" value="${note ? 'note' : 'login'}">` : `<select class="select" id="vi-kind" name="kind"><option value="login">Login</option><option value="note">Secure note</option></select>`}</div>
+      ${note ? '' : `<div class="field"><label class="label" for="vi-user">Username</label><input class="input" id="vi-user" name="username" value="${esc(it?.username || '')}" autocomplete="off"></div>
+      <div class="field"><label class="label" for="vi-uri">URL</label><input class="input mono" id="vi-uri" name="uri" value="${esc(it?.uri || '')}" placeholder="https://…"></div>`}
+      <div class="field span-2"><label class="label" for="vi-pass">${note ? 'Secret (hidden field “secret”)' : 'Password / token'} ${it?.has_password ? '<span class="hint-inline">set · empty = keep</span>' : ''}</label>
+        <div class="row" style="gap:8px"><input class="input mono" id="vi-pass" name="password" type="password" autocomplete="new-password" style="flex:1">
+        <label class="check-row small nowrap"><input type="checkbox" name="generate"> generate</label><input class="input sm" name="length" type="number" min="12" max="128" value="32" style="width:72px" aria-label="Length"></div></div>
+      <div class="field span-2"><label class="label" for="vi-notes">Notes ${it?.has_notes ? '<span class="hint-inline">set · empty = keep</span>' : ''}</label><textarea class="textarea" id="vi-notes" name="notes" rows="3"></textarea></div>
+      ${!it && cols.length ? `<div class="field span-2"><label class="label" for="vi-col">Where</label><select class="select" id="vi-col" name="collection"><option value="">Default (${esc(state.cache.vault?.status?.writes || 'personal vault')})</option><option value="personal">Personal vault</option>${cols.map((c) => `<option value="${esc(c.id)}">${esc(c.org)} / ${esc(c.name)}</option>`).join('')}</select></div>` : ''}
+      <div class="field span-2"><label class="label">Custom hidden fields</label><div id="vault-fields">${(it?.fields || []).filter((f) => !(note && f === 'secret')).map((f) => vaultFieldRow(f, true)).join('')}</div>
+        <button class="btn xs" type="button" data-action="vault-field-add">${icon('plus', 'btn-icon')} Add field</button></div>
+    </div></div><div class="modal-foot"><button class="btn" type="button" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">${it ? 'Save' : 'Create'}</button></div></form>`, 'lg');
+}
+
+async function saveVaultItem(form) {
+  const fd = new FormData(form);
+  const fields = {};
+  form.querySelectorAll('.vault-field').forEach((row) => {
+    const name = row.querySelector('[name="fname"]').value.trim();
+    const value = row.querySelector('[name="fvalue"]').value;
+    if (name && value !== '') fields[name] = value;
+  });
+  const body = {
+    id: form.dataset.id || '', name: String(fd.get('name') || '').trim(), kind: fd.get('kind') || 'login',
+    username: fd.get('username') || '', uri: fd.get('uri') || '', password: fd.get('password') || '', notes: fd.get('notes') || '',
+    generate: fd.get('generate') === 'on', length: Number(fd.get('length')) || 32, collection: fd.get('collection') || '',
+    fields, remove_fields: fd.getAll('fremove'),
+  };
+  const res = await api('/vault/items', { method: 'POST', body });
+  closeModal();
+  toast(res.restarting ? `🔐 Saved · ${res.changed.join(', ')} changed: restarting…` : res.updated ? '🔐 Item updated' : '🔐 Item created');
+  if (!res.restarting) await renderVault();
+}
 
 async function renderAccess() {
   const seq = ++state.routeSeq;
@@ -1701,6 +1781,22 @@ document.addEventListener('click', async (event) => {
       case 'tunnel-remove':
         confirmDialog({ title: `Unpublish ${id}?`, message: 'The route and its DNS record (if it points to the tunnel) are deleted.', confirm: 'Unpublish', onConfirm: async () => { const res = await api(`/tunnel/routes?${new URLSearchParams({ hostname: id })}`, { method: 'DELETE' }); toast(`🚇 ${res.message}`); await renderDeployments(); } });
         break;
+      case 'vault-new': vaultModal(); break;
+      case 'vault-edit': vaultModal(id); break;
+      case 'vault-field-add': document.getElementById('vault-fields')?.insertAdjacentHTML('beforeend', vaultFieldRow()); break;
+      case 'vault-field-drop': target.closest('.vault-field')?.remove(); break;
+      case 'vault-delete': {
+        const it = (state.cache.vault?.items || []).find((x) => x.id === id);
+        confirmDialog({ title: `Delete “${it?.name || id}”?`, message: 'The item goes to the Vaultwarden trash. Anything using its reference stops working.', confirm: 'Delete', onConfirm: async () => { const res = await api(`/vault/items/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast(`🔐 ${res.deleted} deleted`); await renderVault(); } });
+        break;
+      }
+      case 'vault-sync-page': {
+        target.disabled = true;
+        const res = await api('/vault/sync', { method: 'POST' });
+        toast(res.restarting ? `🔐 ${res.changed.join(', ')} changed: restarting…` : '🔐 Vault synced');
+        if (!res.restarting) await renderVault();
+        break;
+      }
       case 'vault-sync': {
         target.disabled = true;
         const res = await api('/vault/sync', { method: 'POST' });
@@ -1726,6 +1822,7 @@ document.addEventListener('input', (event) => {
   const t = event.target;
   if (t.id === 'runs-search') { state.runsSearch = t.value; state.runsPage = 1; debounce(loadRuns); }
   else if (t.id === 'mem-search') { state.memSearch = t.value; state.memPage = 1; debounce(loadMemories, state.memSemantic ? 500 : 280); }
+  else if (t.id === 'vault-search') { state.vaultSearch = t.value; debounce(async () => { await renderVault(); const el = document.getElementById('vault-search'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }); }
   else if (t.id === 'audit-search') { state.auditSearch = t.value; state.auditPage = 1; debounce(loadAudit); }
   else if (t.id === 'chat-input') { t.style.height = 'auto'; t.style.height = `${Math.min(220, t.scrollHeight + 2)}px`; }
 });
@@ -1794,6 +1891,8 @@ document.addEventListener('submit', async (event) => {
       const res = await api('/tunnel/routes', { method: 'POST', body: { hostname: fd.get('hostname'), service: fd.get('service'), path: fd.get('path') } });
       toast(`🚇 ${res.message}`); await renderDeployments();
     });
+  } else if (form.id === 'vault-form') {
+    await run(() => saveVaultItem(form));
   } else if (form.id === 'profile-form') {
     await run(() => saveProfile(form));
   } else if (form.dataset.settingsForm) {
@@ -1841,6 +1940,7 @@ async function route() {
     case 'deployments': return renderDeployments();
     case 'mail': return renderMail();
     case 'access': return renderAccess();
+    case 'vault': return renderVault();
     case 'audit': return renderAudit();
     case 'settings': return renderSettings();
     default: {

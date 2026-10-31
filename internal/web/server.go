@@ -24,6 +24,7 @@ import (
 	"blavingad/internal/scheduler"
 	"blavingad/internal/selfupdate"
 	"blavingad/internal/store"
+	"blavingad/internal/vault"
 )
 
 //go:embed static
@@ -33,6 +34,7 @@ type Hooks struct {
 	SlackStatus   func() map[string]any
 	VaultStatus   func() map[string]any
 	VaultSync     func(ctx context.Context) ([]string, error)
+	Vault         *vault.Client
 	RunSchedule   func(scheduler.Schedule)
 	RunSelfReview func()
 	ReloadSched   func()
@@ -180,6 +182,9 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/vault", a(s.getVault))
 	mux.HandleFunc("POST /api/vault/sync", a(s.syncVault))
+	mux.HandleFunc("GET /api/vault/items", a(s.listVaultItems))
+	mux.HandleFunc("POST /api/vault/items", a(s.saveVaultItem))
+	mux.HandleFunc("DELETE /api/vault/items/{id}", a(s.deleteVaultItem))
 
 	mux.HandleFunc("GET /api/llm/models", a(s.llmModels))
 	mux.HandleFunc("POST /api/llm/test", a(s.llmTest))

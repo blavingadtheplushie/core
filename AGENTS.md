@@ -234,3 +234,9 @@ ADMIN_PASSWORD=dev DATA_DIR=/tmp/blv WORKSPACE_DIR=/tmp/blv/ws LLM_BASE_URL=… 
 - Any tool parameter that carries a `vault://` reference must make
   `NeedsApproval` return true and resolve through `Deps.secretEnv`/`Deps.expand`
   (which enforce the access profile and register values for masking).
+- Vault page in the dashboard (`#/vault`, `GET/POST /api/vault/items`,
+  `DELETE /api/vault/items/{id}`): metadata only, values are **write-only**
+  (replace, generate, add/remove hidden fields, delete to trash) — never add
+  an endpoint that returns a secret value to the browser. Saves go through
+  `vault.Client.Save` (`SaveInput.ID` edits/renames a precise item), are
+  audited without values, re-register masks and trigger `VaultSync`.

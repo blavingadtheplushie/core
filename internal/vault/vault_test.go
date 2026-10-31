@@ -150,3 +150,12 @@ func TestBadCredentials(t *testing.T) {
 		t.Error("a locked vault must not resolve")
 	}
 }
+
+func TestContainsFold(t *testing.T) {
+	if !containsFold([]string{" API_Key "}, "api_key") {
+		t.Fatal("expected case/space-insensitive match")
+	}
+	if containsFold([]string{"token"}, "api_key") {
+		t.Fatal("unexpected match")
+	}
+}

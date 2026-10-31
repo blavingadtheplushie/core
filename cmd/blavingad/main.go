@@ -267,6 +267,7 @@ func serve() int {
 			return map[string]any{"status": vc.Status(), "sources": vaultSources, "masked": core.Secrets.Count()}
 		},
 		VaultSync:     vaultSync,
+		Vault:         vc,
 		LLM:           client,
 		RunSchedule:   runSchedule,
 		RunSelfReview: selfReview,

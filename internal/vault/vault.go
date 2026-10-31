@@ -654,6 +654,11 @@ type SaveInput struct {
 	// Collection (name or id) overrides where the item goes; "personal"
 	// forces the personal vault.
 	Collection string
+	// ID edits that exact item (wherever it lives) instead of matching by
+	// name in the write target; Name then renames it.
+	ID string
+	// RemoveFields deletes these custom fields (case-insensitive).
+	RemoveFields []string
 }
 
 // Target is where new items are written.
@@ -831,13 +836,21 @@ func (c *Client) save(ctx context.Context, in SaveInput, t Target) (Item, bool, 
 	var existing *Item
 	c.mu.RLock()
 	for _, it := range c.items {
-		if strings.EqualFold(it.Name, in.Name) && inTarget(it) {
+		if in.ID != "" && it.ID == in.ID {
+			cp := it
+			existing = &cp
+			break
+		}
+		if in.ID == "" && strings.EqualFold(it.Name, in.Name) && inTarget(it) {
 			cp := it
 			existing = &cp
 			break
 		}
 	}
 	c.mu.RUnlock()
+	if in.ID != "" && existing == nil {
+		return Item{}, false, fmt.Errorf("no item with id %s in the vault", in.ID)
+	}
 
 	var raw map[string]any
 	if existing != nil {
@@ -880,8 +893,22 @@ func (c *Client) save(ctx context.Context, in SaveInput, t Target) (Item, bool, 
 		}
 		in.Fields["secret"] = in.Password
 	}
+	if existing != nil && strings.TrimSpace(in.Name) != "" {
+		raw["name"] = in.Name
+	}
 	if in.Notes != "" {
 		raw["notes"] = in.Notes
+	}
+	if len(in.RemoveFields) > 0 {
+		fields, _ := raw["fields"].([]any)
+		kept := []any{}
+		for _, f := range fields {
+			if fm, ok := f.(map[string]any); ok && containsFold(in.RemoveFields, fmt.Sprint(fm["name"])) {
+				continue
+			}
+			kept = append(kept, f)
+		}
+		raw["fields"] = kept
 	}
 	if len(in.Fields) > 0 {
 		fields, _ := raw["fields"].([]any)
@@ -919,6 +946,51 @@ func (c *Client) save(ctx context.Context, in SaveInput, t Target) (Item, bool, 
 	json.Unmarshal([]byte(lastJSONLine(out)), &saved)
 	c.load(ctx, false)
 	return saved, existing != nil, nil
+}
+
+func containsFold(list []string, v string) bool {
+	for _, s := range list {
+		if strings.EqualFold(strings.TrimSpace(s), strings.TrimSpace(v)) {
+			return true
+		}
+	}
+	return false
+}
+
+// Delete moves an item (by id) to the vault's trash.
+func (c *Client) Delete(ctx context.Context, id string) (string, error) {
+	if err := c.ensureOpen(ctx); err != nil {
+		return "", err
+	}
+	c.mu.RLock()
+	name := ""
+	for _, it := range c.items {
+		if it.ID == id {
+			name = it.Name
+		}
+	}
+	c.mu.RUnlock()
+	if name == "" {
+		return "", fmt.Errorf("no item with id %s in the vault", id)
+	}
+	c.opMu.Lock()
+	defer c.opMu.Unlock()
+	if _, err := c.bw(ctx, nil, "delete", "item", id); err != nil {
+		return "", c.explainWriteError(err, Target{})
+	}
+	c.load(ctx, false)
+	return name, nil
+}
+
+// Collections lists the collections shared with the account ("Org / Name").
+func (c *Client) Collections() []map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := []map[string]string{}
+	for _, col := range c.colls {
+		out = append(out, map[string]string{"id": col.ID, "name": col.Name, "org": c.orgs[col.OrgID]})
+	}
+	return out
 }
 
 func containsStr(list []string, v string) bool {

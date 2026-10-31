@@ -983,6 +983,106 @@ func (s *Server) syncVault(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"changed": changed, "restarting": len(changed) > 0})
 }
 
+// vaultClient returns the vault when it is configured, else writes an error.
+func (s *Server) vaultClient(w http.ResponseWriter) *vault.Client {
+	if s.hooks.Vault == nil || !s.hooks.Vault.Enabled() {
+		writeErr(w, 400, "no vault configured")
+		return nil
+	}
+	return s.hooks.Vault
+}
+
+// listVaultItems returns item metadata only: secret values never leave the
+// server through the dashboard (they can be replaced, not read).
+func (s *Server) listVaultItems(w http.ResponseWriter, r *http.Request) {
+	vc := s.vaultClient(w)
+	if vc == nil {
+		return
+	}
+	items := vc.Search(r.URL.Query().Get("q"), 0)
+	if items == nil {
+		items = []vault.Meta{}
+	}
+	writeJSON(w, 200, map[string]any{"items": items, "folder": vc.Folder(), "collections": vc.Collections(), "status": vc.Status()})
+}
+
+func (s *Server) saveVaultItem(w http.ResponseWriter, r *http.Request) {
+	vc := s.vaultClient(w)
+	if vc == nil {
+		return
+	}
+	var body struct {
+		ID           string            `json:"id"`
+		Name         string            `json:"name"`
+		Kind         string            `json:"kind"`
+		Username     string            `json:"username"`
+		Password     string            `json:"password"`
+		Generate     bool              `json:"generate"`
+		Length       int               `json:"length"`
+		URI          string            `json:"uri"`
+		Notes        string            `json:"notes"`
+		Fields       map[string]string `json:"fields"`
+		RemoveFields []string          `json:"remove_fields"`
+		Collection   string            `json:"collection"`
+	}
+	if err := readJSON(r, &body); err != nil || strings.TrimSpace(body.Name) == "" {
+		writeErr(w, 400, "a name is required")
+		return
+	}
+	for k := range body.Fields {
+		if strings.TrimSpace(k) == "" {
+			writeErr(w, 400, "custom fields need a name")
+			return
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+	if body.Generate {
+		pw, err := vc.Generate(ctx, body.Length)
+		if err != nil {
+			writeErr(w, 502, err.Error())
+			return
+		}
+		body.Password = pw
+	}
+	in := vault.SaveInput{ID: body.ID, Name: strings.TrimSpace(body.Name), Kind: body.Kind, Username: body.Username, Password: body.Password,
+		URI: body.URI, Notes: body.Notes, Fields: body.Fields, RemoveFields: body.RemoveFields, Collection: body.Collection}
+	item, updated, err := vc.Save(ctx, in)
+	if err != nil {
+		writeErr(w, 502, err.Error())
+		return
+	}
+	core.Secrets.Add(vc.Secrets()...)
+	fields := make([]string, 0, len(body.Fields))
+	for k := range body.Fields {
+		fields = append(fields, k)
+	}
+	s.st.Audit(actor(r), map[bool]string{true: "vault.update", false: "vault.create"}[updated], in.Name,
+		map[string]any{"id": item.ID, "password_changed": body.Password != "", "generated": body.Generate, "fields_set": fields, "fields_removed": body.RemoveFields})
+	// A changed item may provide a setting: resync so it applies (restarts if so).
+	var changed []string
+	if s.hooks.VaultSync != nil {
+		changed, _ = s.hooks.VaultSync(ctx)
+	}
+	writeJSON(w, 200, map[string]any{"id": item.ID, "updated": updated, "changed": changed, "restarting": len(changed) > 0})
+}
+
+func (s *Server) deleteVaultItem(w http.ResponseWriter, r *http.Request) {
+	vc := s.vaultClient(w)
+	if vc == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	defer cancel()
+	name, err := vc.Delete(ctx, r.PathValue("id"))
+	if err != nil {
+		writeErr(w, 502, err.Error())
+		return
+	}
+	s.st.Audit(actor(r), "vault.delete", name, map[string]any{"id": r.PathValue("id")})
+	writeJSON(w, 200, map[string]any{"deleted": name})
+}
+
 // ---------- model endpoint ----------
 
 func (s *Server) llmDetail() string {

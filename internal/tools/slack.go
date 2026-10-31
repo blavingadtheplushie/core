@@ -281,7 +281,7 @@ func registerSlack(d *Deps) {
 
 	d.Reg.Add(&core.Tool{
 		Name: "slack_dm", Category: "slack", Emoji: "✉️", Available: ok,
-		Description: "Sends a direct message (DM) to a Slack user.",
+		Description: "Sends a direct message (DM) to a Slack user. Bots cannot be DMed (Slack: cannot_dm_bot): to reach another bot, mention it with slack_post in a shared channel.",
 		Params: core.Obj(map[string]any{
 			"user": core.Str("User's Slack ID (e.g. U0123)."),
 			"text": core.Str("Message."),
@@ -291,11 +291,11 @@ func registerSlack(d *Deps) {
 			user := strings.Trim(strings.TrimPrefix(a.User, "<@"), ">")
 			ch, _, _, err := d.Slack.OpenConversationContext(ctx, &slack.OpenConversationParameters{Users: []string{user}})
 			if err != nil {
-				return "", err
+				return "", dmError(err)
 			}
 			_, ts, err := d.Slack.PostMessageContext(ctx, ch.ID, slack.MsgOptionText(a.Text, false))
 			if err != nil {
-				return "", err
+				return "", dmError(err)
 			}
 			return fmt.Sprintf("DM sent (channel=%s ts=%s).", ch.ID, ts), nil
 		},
@@ -504,4 +504,12 @@ func firstNonEmpty(v ...string) string {
 		}
 	}
 	return ""
+}
+
+// dmError turns Slack's cryptic cannot_dm_bot into an actionable hint.
+func dmError(err error) error {
+	if err != nil && strings.Contains(err.Error(), "cannot_dm_bot") {
+		return fmt.Errorf("cannot_dm_bot: this user is a bot and Slack forbids DMs to bots. Don't retry: mention it with slack_post in a shared channel instead")
+	}
+	return err
 }

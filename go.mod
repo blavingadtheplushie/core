@@ -6,6 +6,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/emersion/go-imap v1.2.1
 	github.com/emersion/go-message v0.18.2
+	github.com/gorilla/websocket v1.5.3
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/slack-go/slack v0.32.0
 	golang.org/x/image v0.47.0
@@ -18,7 +19,6 @@ require (
 	github.com/emersion/go-sasl v0.0.0-20200509203442-7bfe0ed36a21 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect

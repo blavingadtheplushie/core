@@ -577,7 +577,7 @@ func (b *Bot) Post(ctx context.Context, channel, thread string, n core.Notice) (
 
 // Announce posts a notice; runs from outside Slack go to the home channel.
 func (b *Bot) Announce(channel, thread string, n core.Notice) {
-	if channel == "" || strings.HasPrefix(channel, "web") {
+	if channel == "" || strings.HasPrefix(channel, "web") || strings.HasPrefix(channel, "signal:") {
 		channel, thread = b.runner.Settings().HomeChannel, ""
 	}
 	if channel == "" {

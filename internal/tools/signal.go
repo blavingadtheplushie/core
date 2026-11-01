@@ -79,6 +79,7 @@ func signalGroups(ctx context.Context) ([]signalGroup, error) {
 }
 
 var rePhone = regexp.MustCompile(`^\+[1-9][0-9]{6,15}$`)
+var reUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // signalRecipient normalises a recipient: phone number, "group.…" id, or a
 // group name (resolved against listGroups).
@@ -92,6 +93,8 @@ func signalRecipient(ctx context.Context, to string) (string, error) {
 		return to, nil
 	case rePhone.MatchString(clean):
 		return clean, nil
+	case reUUID.MatchString(to):
+		return to, nil
 	}
 	gs, err := signalGroups(ctx)
 	if err != nil {
@@ -246,6 +249,84 @@ func registerSignal(d *Deps) {
 				return "", err
 			}
 			return "Joined (or join requested, if the group needs admin approval): " + Clip(string(res), 2000), nil
+		},
+	})
+}
+
+// SignalNumber is Blavingad's own Signal number (for the inbound bridge).
+func SignalNumber() string { return signalNumber() }
+
+// SignalBase is the signal-cli-rest-api base URL.
+func SignalBase() string { return signalBase() }
+
+// SignalSelfUUID asks signal-cli for the ACI uuid of our own account, used to
+// recognise @mentions in groups.
+func SignalSelfUUID(ctx context.Context) string {
+	res, err := signalRPC(ctx, "getUserStatus", map[string]any{"recipient": []string{signalNumber()}})
+	if err != nil {
+		return ""
+	}
+	var st []struct {
+		UUID string `json:"uuid"`
+	}
+	if json.Unmarshal(res, &st) == nil && len(st) > 0 {
+		return st[0].UUID
+	}
+	return ""
+}
+
+// SignalTyping shows (or stops) the typing indicator for a recipient.
+func SignalTyping(ctx context.Context, to string, on bool) {
+	method := "PUT"
+	if !on {
+		method = "DELETE"
+	}
+	signalDo(ctx, method, "/v1/typing-indicator/"+url.PathEscape(signalNumber()), map[string]any{"recipient": to})
+}
+
+func registerSignalLinks(d *Deps) {
+	d.Reg.Add(&core.Tool{
+		Name: "signal_link", Category: "signal", Emoji: "🔗",
+		Description: "Links a Signal phone number to a Slack user, so messages from that number on Signal get that person's access profile (and approval rights). Empty user = unlink. No number = list links. Admins only.",
+		Params: core.Obj(map[string]any{
+			"number": core.Str("Signal number +E.164 (empty = list current links)."),
+			"user":   core.Str("Slack ID (U…) or mention; empty = remove the link."),
+		}),
+		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
+			a, _ := core.Parse[struct{ Number, User string }](args)
+			links := map[string]string{}
+			json.Unmarshal([]byte(d.St.GetSetting("signal.links", "{}")), &links)
+			num := strings.NewReplacer(" ", "", "-", "", "(", "", ")", "", ".", "").Replace(strings.TrimSpace(a.Number))
+			if num == "" {
+				if len(links) == 0 {
+					return "No Signal number is linked yet.", nil
+				}
+				var lines []string
+				for n, u := range links {
+					lines = append(lines, fmt.Sprintf("• %s → <@%s>", n, u))
+				}
+				return strings.Join(lines, "\n"), nil
+			}
+			if !rc.CanManageAccess() {
+				return "", errors.New("only admins can link Signal numbers")
+			}
+			if !rePhone.MatchString(num) {
+				return "", errors.New("invalid number, expected +E.164 (e.g. +33612345678)")
+			}
+			u := core.NormalizeSlackID(a.User)
+			if u == "" {
+				delete(links, num)
+			} else {
+				links[num] = u
+			}
+			b, _ := json.Marshal(links)
+			if err := d.St.SetSetting("signal.links", string(b)); err != nil {
+				return "", err
+			}
+			if u == "" {
+				return "Unlinked " + num + ".", nil
+			}
+			return fmt.Sprintf("Linked %s → <@%s>.", num, u), nil
 		},
 	})
 }

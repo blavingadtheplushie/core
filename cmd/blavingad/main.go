@@ -26,6 +26,7 @@ import (
 	"blavingad/internal/memory"
 	"blavingad/internal/scheduler"
 	"blavingad/internal/selfupdate"
+	sigbridge "blavingad/internal/signal"
 	"blavingad/internal/slackbot"
 	"blavingad/internal/store"
 	"blavingad/internal/tools"
@@ -254,6 +255,12 @@ func serve() int {
 			post("", "", note)
 		}
 		go ml.Run(ctx)
+	}
+
+	// Signal: inbound bridge to the local signal-cli-rest-api (json-rpc mode).
+	if os.Getenv("SIGNAL_DISABLED") == "" {
+		sb := sigbridge.New(st, runner, access, func(n core.Notice) { post("", "", n) })
+		go sb.Run(ctx)
 	}
 
 	srv := web.New(cfg, st, mem, runner, reg, approvals, access, bus, self, ml, web.Hooks{

@@ -76,6 +76,15 @@ func (d *Deps) resolveChannel(ctx context.Context, ref string) (string, error) {
 	return "", fmt.Errorf("channel not found: %s", ref)
 }
 
+// accessHint adds a next-step hint when the bot token can't see a channel.
+func accessHint(err error) error {
+	e := err.Error()
+	if strings.Contains(e, "not_in_channel") || strings.Contains(e, "channel_not_found") {
+		return fmt.Errorf("%s (the bot is not a member of this channel: if Paul is asking, use slack_read_as_paul; for a public channel you can also slack_join first, otherwise ask someone to invite the bot)", e)
+	}
+	return err
+}
+
 func tsTime(ts string) string {
 	f, err := strconv.ParseFloat(ts, 64)
 	if err != nil {
@@ -143,7 +152,7 @@ func registerSlack(d *Deps) {
 			}
 			res, err := d.Slack.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{ChannelID: ch, Limit: a.Limit, Oldest: a.Oldest})
 			if err != nil {
-				return "", err
+				return "", accessHint(err)
 			}
 			msgs := res.Messages
 			for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
@@ -174,7 +183,7 @@ func registerSlack(d *Deps) {
 			}
 			msgs, _, _, err := d.Slack.GetConversationRepliesContext(ctx, &slack.GetConversationRepliesParameters{ChannelID: ch, Timestamp: a.ThreadTS, Limit: 200})
 			if err != nil {
-				return "", err
+				return "", accessHint(err)
 			}
 			return Clip(d.formatMessages(ctx, msgs), 0), nil
 		},

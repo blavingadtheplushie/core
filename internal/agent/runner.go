@@ -68,10 +68,12 @@ type Request struct {
 	UserName    string
 	Text        string
 	History     []llm.Message
-	Extra       string
-	ParentID    string
-	Depth       int
-	AllowTools  []string
+	// Images are pictures attached to the message (vision).
+	Images     []llm.Image
+	Extra      string
+	ParentID   string
+	Depth      int
+	AllowTools []string
 	// Profile restricts tools/memory for the person behind the run (nil =
 	// full access, for system runs).
 	Profile *core.Profile
@@ -249,7 +251,10 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 	}
 	msgs := []llm.Message{{Role: "system", Content: sys}}
 	msgs = append(msgs, req.History...)
-	msgs = append(msgs, llm.Message{Role: "user", Content: req.Text})
+	msgs = append(msgs, llm.Message{Role: "user", Content: req.Text, Images: req.Images})
+	if len(req.Images) > 0 {
+		r.step(res.RunID, "vision", "images", "", fmt.Sprintf("%d image(s) attached to the message", len(req.Images)), "ok", 0, 0)
+	}
 
 	var requested map[string]bool
 	if req.AllowTools != nil {
@@ -339,8 +344,10 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 		results := r.execTools(ctx, rc, resp.Message.ToolCalls, progress, iter)
 		res.ToolCalls += len(results)
 		for i, tc := range resp.Message.ToolCalls {
-			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Name: tc.Function.Name, Content: results[i]})
+			content, imgs := toolImages(results[i])
+			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Name: tc.Function.Name, Content: content, Images: imgs})
 		}
+		msgs = llm.CapImages(msgs, maxContextImages)
 		if iter == maxIter {
 			msgs = append(msgs, llm.Message{Role: "user", Content: "[System] Step limit reached. Answer now without calling any tool: summarize what you did, the result, and what is left to do."})
 			resp, err := r.llm.Chat(ctx, llm.Request{Model: s.Model, Messages: msgs, Temperature: &temp, MaxTokens: r.cfg.LLMMaxTokens})
@@ -650,4 +657,29 @@ func clip(s string, max int) string {
 	}
 	head := max * 2 / 3
 	return s[:head] + fmt.Sprintf("\n…[%d characters omitted]…\n", len(s)-max) + s[len(s)-(max-head):]
+}
+
+// maxContextImages caps how many pictures stay in one run's context.
+const maxContextImages = 8
+
+// toolImages turns `[[image:/path]]` markers printed by a tool into images
+// the model can see (vision). Unreadable files become a note in the text.
+func toolImages(out string) (string, []llm.Image) {
+	text, paths := llm.ExtractImageMarkers(out)
+	if len(paths) == 0 {
+		return out, nil
+	}
+	var imgs []llm.Image
+	for _, p := range paths {
+		img, err := llm.LoadImage(p)
+		if err != nil {
+			text += "\n[image not attached: " + err.Error() + "]"
+			continue
+		}
+		imgs = append(imgs, img)
+	}
+	if text == "" {
+		text = fmt.Sprintf("(%d image(s) attached)", len(imgs))
+	}
+	return text, imgs
 }

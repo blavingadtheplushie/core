@@ -331,8 +331,9 @@ func (b *Bot) cleanText(text string) string {
 	return strings.TrimSpace(text)
 }
 
-func (b *Bot) downloadFiles(ctx context.Context, ts string, files []slack.File) []string {
+func (b *Bot) downloadFiles(ctx context.Context, ts string, files []slack.File) ([]string, []llm.Image) {
 	var notes []string
+	var imgs []llm.Image
 	dir := filepath.Join(b.cfg.WorkspaceDir, "inbox", strings.ReplaceAll(ts, ".", "-"))
 	for _, f := range files {
 		if f.Size > 50<<20 {
@@ -355,9 +356,18 @@ func (b *Bot) downloadFiles(ctx context.Context, ts string, files []slack.File) 
 			notes = append(notes, f.Name+" (download failed: "+err.Error()+")")
 			continue
 		}
-		notes = append(notes, fmt.Sprintf("%s → %s (%s, %d octets)", f.Name, path, f.Mimetype, f.Size))
+		note := fmt.Sprintf("%s → %s (%s, %d octets)", f.Name, path, f.Mimetype, f.Size)
+		// Vision: pictures are also shown to the model directly.
+		if llm.IsImageType(f.Mimetype) && len(imgs) < 6 {
+			if img, err := llm.LoadImage(path); err == nil {
+				img.Name = f.Name
+				imgs = append(imgs, img)
+				note += " — attached, you can see it"
+			}
+		}
+		notes = append(notes, note)
 	}
-	return notes
+	return notes, imgs
 }
 
 // history rebuilds the conversation as chat messages: the thread if any,
@@ -439,8 +449,10 @@ func (b *Bot) respond(ctx context.Context, ev *slackevents.MessageEvent, files [
 
 	userName := b.userName(ctx, ev.User)
 	text := b.cleanText(ev.Text)
+	var images []llm.Image
 	if len(files) > 0 {
-		notes := b.downloadFiles(ctx, ev.TimeStamp, files)
+		var notes []string
+		notes, images = b.downloadFiles(ctx, ev.TimeStamp, files)
 		if len(notes) > 0 {
 			text += "\n\n[Attached files, downloaded to your workspace:\n- " + strings.Join(notes, "\n- ") + "]"
 		}
@@ -458,7 +470,7 @@ func (b *Bot) respond(ctx context.Context, ev *slackevents.MessageEvent, files [
 	res := b.runner.Run(ctx, agent.Request{
 		Source: "slack", Channel: ev.Channel, ChannelName: b.channelName(ctx, ev.Channel),
 		ThreadTS: ev.ThreadTimeStamp, MessageTS: ev.TimeStamp, UserID: ev.User, UserName: userName,
-		Text: fmt.Sprintf("%s (<@%s>): %s", userName, ev.User, text), History: b.history(ctx, ev), Extra: extra, Profile: prof,
+		Text: fmt.Sprintf("%s (<@%s>): %s", userName, ev.User, text), History: b.history(ctx, ev), Images: images, Extra: extra, Profile: prof,
 		OnStart:    func(id string) { live.runID = id },
 		OnProgress: live.progress,
 	})

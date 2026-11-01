@@ -50,6 +50,7 @@ func RegisterAll(d *Deps) {
 	registerSlackBlocks(d)
 	registerMemory(d)
 	registerFiles(d)
+	registerVision(d)
 	registerGitHub(d)
 	registerEmail(d)
 	registerDeploy(d)

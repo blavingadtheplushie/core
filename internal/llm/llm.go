@@ -22,6 +22,8 @@ type Message struct {
 	Name       string     `json:"name,omitempty"`
 	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string     `json:"tool_call_id,omitempty"`
+	// Images are pictures attached to a user or tool turn (vision models).
+	Images []Image `json:"-"`
 }
 
 // MarshalJSON keeps `content` present (some servers reject a missing field)
@@ -34,6 +36,16 @@ func (m Message) MarshalJSON() ([]byte, error) {
 	}{alias: alias(m), Content: m.Content}
 	if m.Content == "" && len(m.ToolCalls) > 0 {
 		out.Content = nil
+	}
+	if len(m.Images) > 0 && m.Role == "user" {
+		parts := []map[string]any{}
+		if strings.TrimSpace(m.Content) != "" {
+			parts = append(parts, map[string]any{"type": "text", "text": m.Content})
+		}
+		for _, img := range m.Images {
+			parts = append(parts, map[string]any{"type": "image_url", "image_url": map[string]string{"url": img.DataURL()}})
+		}
+		out.Content = parts
 	}
 	return json.Marshal(out)
 }
@@ -152,7 +164,7 @@ func (c *Client) Chat(ctx context.Context, req Request) (*Response, error) {
 	if style == StyleAnthropic {
 		return c.chatAnthropic(ctx, base, req)
 	}
-	body := map[string]any{"model": req.Model, "messages": req.Messages}
+	body := map[string]any{"model": req.Model, "messages": openAIMessages(req.Messages)}
 	if len(req.Tools) > 0 {
 		body["tools"] = req.Tools
 		if req.ToolChoice != nil {
@@ -396,7 +408,7 @@ func truncate(s string, n int) string {
 func EstimateTokens(msgs []Message) int {
 	total := 0
 	for _, m := range msgs {
-		total += len(m.Content) + 16
+		total += len(m.Content) + 16 + len(m.Images)*ImageTokens*7/2
 		for _, tc := range m.ToolCalls {
 			total += len(tc.Function.Arguments) + len(tc.Function.Name) + 16
 		}
@@ -413,4 +425,41 @@ func firstNonEmpty(v ...string) string {
 		}
 	}
 	return ""
+}
+
+// openAIMessages adapts images for the OpenAI shape: tool messages can't
+// carry images, so they move to a user turn right after the tool results.
+func openAIMessages(msgs []Message) []Message {
+	has := false
+	for _, m := range msgs {
+		if len(m.Images) > 0 {
+			has = true
+			break
+		}
+	}
+	if !has {
+		return msgs
+	}
+	out := make([]Message, 0, len(msgs)+2)
+	var pending []Image
+	flush := func() {
+		if len(pending) > 0 {
+			out = append(out, Message{Role: "user", Content: "[Images returned by the tools above]", Images: pending})
+			pending = nil
+		}
+	}
+	for _, m := range msgs {
+		if m.Role != "tool" {
+			flush()
+		}
+		if m.Role == "tool" && len(m.Images) > 0 {
+			pending = append(pending, m.Images...)
+			m.Images = nil
+		} else if m.Role != "user" {
+			m.Images = nil
+		}
+		out = append(out, m)
+	}
+	flush()
+	return out
 }

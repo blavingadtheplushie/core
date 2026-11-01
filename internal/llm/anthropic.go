@@ -19,8 +19,23 @@ type anthBlock struct {
 	Name      string          `json:"name,omitempty"`
 	Input     json.RawMessage `json:"input,omitempty"`
 	ToolUseID string          `json:"tool_use_id,omitempty"`
-	Content   string          `json:"content,omitempty"`
+	Content   any             `json:"content,omitempty"` // string, or blocks for tool results with images
+	Source    *anthSource     `json:"source,omitempty"`
 	Thinking  string          `json:"thinking,omitempty"`
+}
+
+type anthSource struct {
+	Type      string `json:"type"`
+	MediaType string `json:"media_type"`
+	Data      string `json:"data"`
+}
+
+func anthImages(imgs []Image) []anthBlock {
+	out := make([]anthBlock, 0, len(imgs))
+	for _, img := range imgs {
+		out = append(out, anthBlock{Type: "image", Source: &anthSource{Type: "base64", MediaType: img.MediaType, Data: img.Data}})
+	}
+	return out
 }
 
 type anthMessage struct {
@@ -75,11 +90,21 @@ func toAnthropic(msgs []Message) (string, []anthMessage) {
 			if content == "" {
 				content = "(no output)"
 			}
-			push("user", anthBlock{Type: "tool_result", ToolUseID: m.ToolCallID, Content: content})
-		default: // user
-			if strings.TrimSpace(m.Content) != "" {
-				push("user", anthBlock{Type: "text", Text: m.Content})
+			if len(m.Images) > 0 {
+				blocks := append([]anthBlock{{Type: "text", Text: content}}, anthImages(m.Images)...)
+				push("user", anthBlock{Type: "tool_result", ToolUseID: m.ToolCallID, Content: blocks})
+			} else {
+				push("user", anthBlock{Type: "tool_result", ToolUseID: m.ToolCallID, Content: content})
 			}
+		default: // user
+			var blocks []anthBlock
+			if len(m.Images) > 0 {
+				blocks = append(blocks, anthImages(m.Images)...)
+			}
+			if strings.TrimSpace(m.Content) != "" {
+				blocks = append(blocks, anthBlock{Type: "text", Text: m.Content})
+			}
+			push("user", blocks...)
 		}
 	}
 	if len(out) == 0 || out[0].Role != "user" {

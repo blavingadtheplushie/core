@@ -61,6 +61,7 @@ func RegisterAll(d *Deps) {
 	registerVault(d)
 	registerElevenLabs(d)
 	registerSlackUser(d)
+	registerSignal(d)
 	LoadCustomTools(d)
 }
 

@@ -149,7 +149,7 @@ func registerVault(d *Deps) {
 
 	d.Reg.Add(&core.Tool{
 		Name: "vault_reveal", Category: "vault", Emoji: "👁️", Risk: core.RiskSensitive, Available: ok,
-		Description: "Shows a secret's value TO THE PERSON TALKING TO YOU, as an ephemeral Slack message only they can see. You never see the value. Only use it when a human really needs it (e.g. to log into a site).",
+		Description: "Shows a secret's value TO THE PERSON TALKING TO YOU, as an ephemeral Slack message only they can see. You never see the value. Only use it when a human really needs it (e.g. to log into a site). Slack only: in admin dashboard (web) conversations it always fails, so don't call it there; point the person to Vaultwarden directly (folder BLAVINGAD) or offer to reveal it in Slack.",
 		Params: core.Obj(map[string]any{
 			"reference": core.Str("vault://Item/field"),
 			"reason":    core.Str("Why this person needs it."),

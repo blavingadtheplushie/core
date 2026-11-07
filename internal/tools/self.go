@@ -248,6 +248,11 @@ var runtimes = map[string][2]string{
 
 func (d *Deps) addCustomTool(name, desc string, schema map[string]any, runtime, code string) {
 	rt := runtimes[runtime]
+	// Avoid stacking the suffix when a tool is re-created from its own description.
+	for strings.HasSuffix(strings.TrimSpace(desc), "[tool created by you]") {
+		desc = strings.TrimSuffix(strings.TrimSpace(desc), "[tool created by you]")
+	}
+	desc = strings.TrimSpace(desc)
 	dir := filepath.Join(d.Cfg.DataDir, "tools")
 	os.MkdirAll(dir, 0o755)
 	script := filepath.Join(dir, name+rt[1])

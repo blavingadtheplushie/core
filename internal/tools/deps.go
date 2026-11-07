@@ -41,6 +41,9 @@ type Deps struct {
 	Vault  *vault.Client
 	// Reveal shows a secret to the human behind a run (Slack ephemeral).
 	Reveal func(rc *core.RunContext, ref, value string) error
+	// Ask shows a Slack form (button → modal) to the human behind a run and
+	// waits for the answer. secret=true answers must never reach the model.
+	Ask func(ctx context.Context, rc *core.RunContext, label, hint, name string, secret bool) (string, error)
 }
 
 // RegisterAll wires every built-in tool plus the agent-authored ones.
@@ -63,6 +66,7 @@ func RegisterAll(d *Deps) {
 	registerSlackUser(d)
 	registerSignal(d)
 	registerSignalLinks(d)
+	registerAsk(d)
 	LoadCustomTools(d)
 }
 

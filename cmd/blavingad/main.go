@@ -182,6 +182,9 @@ func serve() int {
 	if bot != nil {
 		deps.Slack = bot.API
 		deps.Reveal = bot.RevealSecret
+		deps.Ask = func(ctx context.Context, rc *core.RunContext, label, hint, name string, secret bool) (string, error) {
+			return bot.Ask(ctx, rc, slackbot.AskRequest{Label: label, Hint: hint, Name: name, Secret: secret})
+		}
 	}
 
 	// vaultSync pulls the vault; if a setting it provides changed, restart

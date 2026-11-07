@@ -126,6 +126,10 @@ func (b *Bot) ephemeral(ctx context.Context, cb slack.InteractionCallback, n cor
 }
 
 func (b *Bot) onInteraction(ctx context.Context, cb slack.InteractionCallback) {
+	if cb.Type == slack.InteractionTypeViewSubmission {
+		b.submitAsk(cb)
+		return
+	}
 	if cb.Type != slack.InteractionTypeBlockActions {
 		return
 	}
@@ -133,6 +137,8 @@ func (b *Bot) onInteraction(ctx context.Context, cb slack.InteractionCallback) {
 		switch act.ActionID {
 		case "approve", "deny", "always":
 			b.decide(ctx, cb, act)
+		case "ask_open":
+			b.openAsk(ctx, cb, act)
 		}
 	}
 }

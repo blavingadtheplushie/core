@@ -166,6 +166,9 @@ func registerSlackUser(d *Deps) {
 				}
 			}
 			if err != nil {
+				if strings.Contains(err.Error(), "thread_not_found") {
+					return "", fmt.Errorf("%s (thread_ts must be the PARENT message ts in that exact channel: if the ts came from a search hit that is a reply, use its thread_ts / the 'thread_ts=' param of its permalink, or omit thread_ts to read the channel history)", err.Error())
+				}
 				return "", err
 			}
 			d.St.Audit(rc.Actor(), "slack.read_as_user", a.Channel, map[string]any{"thread": a.ThreadTS, "messages": len(msgs)})

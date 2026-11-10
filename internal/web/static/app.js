@@ -1052,7 +1052,7 @@ async function loadChannels() {
 /* ---------- Tools ---------- */
 const CATEGORIES = {
   web: ['🌐', 'Web'], slack: ['💬', 'Slack'], memory: ['🧠', 'Memory'], code: ['💻', 'Code & files'], github: ['🐙', 'GitHub'],
-  email: ['📬', 'Email'], deploy: ['🚀', 'Deployment'], self: ['🧬', 'Self-improvement'], system: ['⚙️', 'System'], access: ['🛂', 'Access'], vault: ['🔐', 'Vault'], audio: ['🗣️', 'Audio'], custom: ['🧩', 'Agent-created'],
+  email: ['📬', 'Email'], deploy: ['🚀', 'Deployment'], self: ['🧬', 'Self-improvement'], system: ['⚙️', 'System'], access: ['🛂', 'Access'], vault: ['🔐', 'Vault'], audio: ['🗣️', 'Audio'], signal: ['📡', 'Signal'], discord: ['🎮', 'Discord'], custom: ['🧩', 'Agent-created'],
 };
 const POLICIES = [['auto', 'Auto'], ['approve', 'Approve'], ['off', 'Off']];
 

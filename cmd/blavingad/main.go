@@ -26,6 +26,7 @@ import (
 	"blavingad/internal/memory"
 	"blavingad/internal/scheduler"
 	"blavingad/internal/selfupdate"
+	dcbridge "blavingad/internal/discord"
 	sigbridge "blavingad/internal/signal"
 	"blavingad/internal/slackbot"
 	"blavingad/internal/store"
@@ -269,6 +270,13 @@ func serve() int {
 	if os.Getenv("SIGNAL_DISABLED") == "" {
 		sb := sigbridge.New(st, runner, access, func(n core.Notice) { post("", "", n) })
 		go sb.Run(ctx)
+	}
+
+	// Discord: gateway bridge for the bot installed as a user app (token in
+	// vault://DISCORD_BOT_TOKEN/password; idle until it exists).
+	if os.Getenv("DISCORD_DISABLED") == "" {
+		db := dcbridge.New(st, runner, access, func(n core.Notice) { post("", "", n) })
+		go db.Run(ctx)
 	}
 
 	srv := web.New(cfg, st, mem, runner, reg, approvals, access, bus, self, ml, web.Hooks{

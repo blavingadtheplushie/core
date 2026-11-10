@@ -66,6 +66,7 @@ func RegisterAll(d *Deps) {
 	registerSlackUser(d)
 	registerSignal(d)
 	registerSignalLinks(d)
+	registerDiscord(d)
 	registerAsk(d)
 	LoadCustomTools(d)
 }

@@ -101,6 +101,8 @@ func (r *Runner) environment(rc *core.RunContext) string {
 		fmt.Fprintf(&b, "- Conversation: Slack, %s (channel=%s, thread=%s)\n", where, rc.Channel, firstNonEmpty(rc.ThreadTS, rc.MessageTS))
 	case "signal":
 		fmt.Fprintf(&b, "- Conversation: Signal (%s, %s). Your answer is sent there as a Signal message: plain text, no Slack mrkdwn\n", rc.ChannelName, rc.Channel)
+	case "discord":
+		fmt.Fprintf(&b, "- Conversation: Discord (%s, %s). Your answer is sent there as a Discord message: Discord markdown, no Slack mrkdwn\n", rc.ChannelName, rc.Channel)
 	case "web":
 		b.WriteString("- Conversation: the admin web dashboard (regular markdown is fine)\n")
 	case "email":
@@ -112,8 +114,8 @@ func (r *Runner) environment(rc *core.RunContext) string {
 	case "subagent":
 		b.WriteString("- You are a sub-agent: do the requested task and return a complete, factual report. No small talk.\n")
 	}
-	if rc.UserID == "" && rc.Source == "signal" {
-		fmt.Fprintf(&b, "- You are talking to: %s (unlinked Signal number)", rc.UserName)
+	if rc.UserID == "" && (rc.Source == "signal" || rc.Source == "discord") {
+		fmt.Fprintf(&b, "- You are talking to: %s (unlinked %s account)", rc.UserName, rc.Source)
 		if rc.Profile != nil {
 			fmt.Fprintf(&b, " — access profile %s %s", rc.Profile.Emoji, rc.Profile.Label)
 		}

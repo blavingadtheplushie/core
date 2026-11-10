@@ -167,6 +167,7 @@ func (s *Server) integrations() []map[string]any {
 		{"key": "docker", "label": "Docker", "emoji": "🐳", "ok": c.DockerEnabled, "detail": docker},
 		s.tunnelIntegration(),
 		signalIntegration(),
+		discordIntegration(),
 		{"key": "oidc", "label": "SSO (OIDC)", "emoji": "🛡️", "ok": c.OIDCConfigured(), "detail": oidcDetail},
 	}
 }

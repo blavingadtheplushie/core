@@ -48,7 +48,7 @@ func (b *Bot) Ask(ctx context.Context, rc *core.RunContext, req AskRequest) (str
 		req.Timeout = 15 * time.Minute
 	}
 	channel, thread := rc.Channel, firstNonEmpty(rc.ThreadTS, rc.MessageTS)
-	if channel == "" || strings.HasPrefix(channel, "web") || strings.HasPrefix(channel, "signal:") {
+	if channel == "" || strings.HasPrefix(channel, "web") || strings.HasPrefix(channel, "signal:") || strings.HasPrefix(channel, "discord:") {
 		channel, thread = rc.UserID, "" // DM the person
 	}
 	if strings.HasPrefix(channel, "D") {

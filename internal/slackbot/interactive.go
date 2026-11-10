@@ -14,7 +14,7 @@ import (
 // NotifyApproval implements core.ApprovalNotifier with a Block Kit card.
 func (b *Bot) NotifyApproval(a *core.Approval) (string, string) {
 	channel, thread := a.Channel, a.ThreadTS
-	if channel == "" || strings.HasPrefix(channel, "web") || strings.HasPrefix(channel, "signal:") {
+	if channel == "" || strings.HasPrefix(channel, "web") || strings.HasPrefix(channel, "signal:") || strings.HasPrefix(channel, "discord:") {
 		channel, thread = b.runner.Settings().HomeChannel, ""
 	}
 	if channel == "" {

@@ -161,6 +161,11 @@ func serve() int {
 			Text: fmt.Sprintf("[Scheduled task %q, created by %s]\n%s", sc.Name, sc.CreatedBy, sc.Prompt),
 		})
 		st.DB.Exec(`UPDATE schedules SET last_status = ? WHERE id = ?`, res.Status, sc.ID)
+		// The agent answers [SILENT] when there is nothing worth posting.
+		if res.Status == "done" && strings.HasPrefix(strings.TrimSpace(res.Output), "[SILENT]") {
+			slog.Info("scheduled task silent", "task", sc.Name)
+			return
+		}
 		n := core.Notice{Title: "Scheduled task", Task: sc.Name, Body: res.Output}
 		if res.Status != "done" {
 			n.Status, n.Detail = "error", "Run ended with status "+res.Status

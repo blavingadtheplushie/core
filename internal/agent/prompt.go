@@ -106,7 +106,7 @@ func (r *Runner) environment(rc *core.RunContext) string {
 	case "email":
 		b.WriteString("- Trigger: an incoming email\n")
 	case "schedule":
-		b.WriteString("- Trigger: one of your scheduled tasks\n")
+		b.WriteString("- Trigger: one of your scheduled tasks. Your final answer is posted in the channel. If there is nothing new or actionable to report (no change, nothing to do), your final answer must be exactly [SILENT] and nothing will be posted.\n")
 	case "self":
 		b.WriteString("- Trigger: your self-improvement review\n")
 	case "subagent":

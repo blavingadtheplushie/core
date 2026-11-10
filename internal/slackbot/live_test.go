@@ -216,14 +216,42 @@ func TestNativeChunksDelta(t *testing.T) {
 	}
 	l.progress(agent.Progress{Kind: "tool_end", Tool: "web_search", Category: "web", Emoji: "🔎", Label: "Web search: x", OK: true, Text: "ok"})
 	l.progress(agent.Progress{Kind: "thinking", Iteration: 2})
-	l.progress(agent.Progress{Kind: "draft", Text: "Voici *la"})
+	l.progress(agent.Progress{Kind: "draft", Text: "Intro.\n\nVoici *la"})
 	c := l.nativeChunks()
 	if len(c) != 2 {
 		t.Fatalf("want task update + text, got %d", len(c))
 	}
-	l.progress(agent.Progress{Kind: "draft", Text: "Voici *la réponse*"})
+	l.progress(agent.Progress{Kind: "draft", Text: "Intro.\n\nVoici *la réponse*"})
 	c = l.nativeChunks()
 	if len(c) != 1 || c[0].(slack.MarkdownTextChunk).Text != " réponse**" {
 		t.Fatalf("bad text delta: %+v", c)
+	}
+}
+
+// Narration written before a tool call must not leak into the streamed
+// answer: it goes to the plan as a Thinking card instead.
+func TestNativeNarrationGoesToPlan(t *testing.T) {
+	l := newTestLive()
+	l.sent = map[int]string{}
+	l.progress(agent.Progress{Kind: "thinking", Iteration: 1})
+	l.progress(agent.Progress{Kind: "draft", Text: "Code de vérif envoyé, je vais le"})
+	if c := l.nativeChunks(); len(c) != 0 {
+		t.Fatalf("short narration must not be streamed, got %+v", c)
+	}
+	l.progress(agent.Progress{Kind: "draft", Text: ""})
+	l.progress(agent.Progress{Kind: "thought", Text: "Code de vérif envoyé, je vais le lire."})
+	c := l.nativeChunks()
+	if len(c) != 1 {
+		t.Fatalf("want 1 thinking card, got %+v", c)
+	}
+	if tc, ok := c[0].(slack.TaskUpdateChunk); !ok || !strings.Contains(tc.Title, "Thinking") {
+		t.Fatalf("want a Thinking task card, got %+v", c[0])
+	}
+	l.progress(agent.Progress{Kind: "thinking", Iteration: 2})
+	long := strings.Repeat("réponse finale ", 20)
+	l.progress(agent.Progress{Kind: "draft", Text: long})
+	c = l.nativeChunks()
+	if len(c) != 1 {
+		t.Fatalf("long final answer must stream, got %+v", c)
 	}
 }

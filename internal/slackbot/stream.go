@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/slack-go/slack"
 )
@@ -14,9 +15,9 @@ import (
 // Native Slack streaming (chat.startStream / appendStream / stopStream),
 // used when the stream_replies setting is on and the reply goes in a thread.
 //
-// While the agent works, tool calls are streamed as task_update chunks
-// (rendered by Slack as a live plan) and the text the model writes is
-// streamed as markdown_text. When the run ends the stream is stopped and the
+// While the agent works, tool calls and thoughts are streamed as task_update
+// chunks (rendered by Slack as a live plan) and the answer text is streamed
+// as markdown_text once it is clearly an answer (see looksLikeAnswer). When the run ends the stream is stopped and the
 // message is replaced (chat.update) by the usual final layout, so the stored
 // answer is identical to the non-streamed one (clean mrkdwn, full plan,
 // reflection updates). Any API error falls back to the classic live message.
@@ -66,9 +67,6 @@ func (l *liveMessage) nativeChunks() []slack.StreamChunk {
 	defer l.mu.Unlock()
 	var chunks []slack.StreamChunk
 	for i, e := range l.events {
-		if e.kind == "thought" {
-			continue // narration is streamed as text; the final plan keeps it
-		}
 		c := slack.NewTaskUpdateChunk(fmt.Sprintf("t%d", i+1), e.taskTitle())
 		c.Status = slack.TaskCardStatus(e.status)
 		if d := strings.TrimSpace(e.details); d != "" {
@@ -91,6 +89,13 @@ func (l *liveMessage) nativeChunks() []slack.StreamChunk {
 	if l.iteration != l.textIter {
 		l.textIter, l.streamed, l.textBroken = l.iteration, "", false
 	}
+	// Text the model writes before a tool call (narration) belongs in the
+	// plan, but appendStream cannot take text back. So a turn's text is only
+	// streamed once it looks like a real answer; narration stays hidden and
+	// shows up as a "Thinking" card when the turn ends with tool calls.
+	if l.streamed == "" && !looksLikeAnswer(l.draft) {
+		return chunks
+	}
 	if conv := streamMarkdown(l.draft); !l.textBroken && conv != "" {
 		if !strings.HasPrefix(conv, l.streamed) {
 			l.textBroken = true // redaction rewrote earlier text: wait for the final answer
@@ -103,6 +108,15 @@ func (l *liveMessage) nativeChunks() []slack.StreamChunk {
 		}
 	}
 	return chunks
+}
+
+// streamAnswerAfter is how much text a turn needs before it is streamed as
+// the answer: narration next to tool calls is almost always one short line.
+const streamAnswerAfter = 240
+
+func looksLikeAnswer(draft string) bool {
+	d := strings.TrimSpace(draft)
+	return utf8.RuneCountInString(d) >= streamAnswerAfter || strings.Contains(d, "\n\n")
 }
 
 // flushNative sends pending chunks. last=true closes the stream.

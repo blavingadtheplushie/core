@@ -43,6 +43,18 @@ func registerVision(d *Deps) {
 					return "", err
 				}
 			}
+			// The file is often produced by a shell command launched in the same
+			// parallel batch: wait a little for it to appear instead of failing.
+			for i := 0; i < 40; i++ {
+				if _, serr := os.Stat(p); serr == nil || !os.IsNotExist(serr) {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					return "", ctx.Err()
+				case <-time.After(500 * time.Millisecond):
+				}
+			}
 			img, err := llm.LoadImage(p)
 			if err != nil {
 				return "", err

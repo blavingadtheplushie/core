@@ -34,6 +34,7 @@ type liveMessage struct {
 	iteration int
 	version   int
 	dirty     bool
+	draft     string // reply streamed so far (stream_replies setting)
 	stop      chan struct{}
 }
 
@@ -140,7 +141,7 @@ func (l *liveMessage) start(ctx context.Context) {
 		l.ts = ts
 	}
 	go func() {
-		t := time.NewTicker(1500 * time.Millisecond)
+		t := time.NewTicker(1200 * time.Millisecond)
 		defer t.Stop()
 		for {
 			select {
@@ -165,6 +166,11 @@ func (l *liveMessage) progress(p agent.Progress) {
 	switch p.Kind {
 	case "thinking":
 		l.iteration = p.Iteration
+	case "draft":
+		if p.Text == l.draft {
+			return
+		}
+		l.draft = p.Text
 	case "recall":
 		if p.Count > 0 {
 			l.events = append(l.events, &event{kind: "recall", emoji: "🧠", status: "complete",
@@ -274,7 +280,23 @@ func (l *liveMessage) workingBlocks(plan bool) []slack.Block {
 	if l.iteration > 1 {
 		title = fmt.Sprintf("Working on it… (step %d)", l.iteration)
 	}
-	return []slack.Block{l.planBlock(title)}
+	return append([]slack.Block{l.planBlock(title)}, l.draftBlocks()...)
+}
+
+// draftBlocks renders the reply streamed so far, with a cursor.
+func (l *liveMessage) draftBlocks() []slack.Block {
+	if strings.TrimSpace(l.draft) == "" {
+		return nil
+	}
+	chunks := Chunk(ToMrkdwn(l.draft)+" ▍", finalChunkSize)
+	if len(chunks) > 40 {
+		chunks = chunks[:40]
+	}
+	var blocks []slack.Block
+	for _, c := range chunks {
+		blocks = append(blocks, section(c))
+	}
+	return blocks
 }
 
 func doneTitle(tools, thoughts int, status string) string {
@@ -360,6 +382,12 @@ func (l *liveMessage) legacyWorking() []slack.Block {
 			line = "💭  _" + escape(clipRunes(e.details, 200)) + "_"
 		}
 		blocks = append(blocks, contextLine(line))
+	}
+	if d := l.draftBlocks(); len(d) > 0 {
+		if len(blocks) > 9 {
+			blocks = blocks[:1]
+		}
+		blocks = append(blocks, d...)
 	}
 	return blocks
 }

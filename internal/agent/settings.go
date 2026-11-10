@@ -28,9 +28,12 @@ type Settings struct {
 	// BotReplyLimit caps consecutive bot messages answered in one thread
 	// until a human writes again (0 = never answer other bots).
 	BotReplyLimit int `json:"bot_reply_limit"`
+	// StreamReplies shows the answer word by word in Slack while the model
+	// writes it, instead of all at once at the end.
+	StreamReplies bool `json:"stream_replies"`
 }
 
-var SettingKeys = []string{"api_style", "base_url", "model", "fast_model", "temperature", "max_iterations", "reflection", "self_review", "self_review_cron", "follow_threads", "email_auto", "email_profile", "home_channel", "channel_digest", "extra_prompt", "bot_reply_limit"}
+var SettingKeys = []string{"api_style", "base_url", "model", "fast_model", "temperature", "max_iterations", "reflection", "self_review", "self_review_cron", "follow_threads", "email_auto", "email_profile", "home_channel", "channel_digest", "extra_prompt", "bot_reply_limit", "stream_replies"}
 
 func LoadSettings(st *store.Store, cfg *config.Config) Settings {
 	get := func(k, def string) string { return st.GetSetting("agent."+k, def) }
@@ -67,5 +70,6 @@ func LoadSettings(st *store.Store, cfg *config.Config) Settings {
 		ChannelDigest:  b("channel_digest", true),
 		ExtraPrompt:    get("extra_prompt", ""),
 		BotReplyLimit:  botLimit,
+		StreamReplies:  b("stream_replies", false),
 	}
 }

@@ -151,7 +151,14 @@ func (c *Client) chatAnthropic(ctx context.Context, base string, req Request) (*
 		body["tools"] = tools
 	}
 	var raw anthResponse
-	data, err := c.post(ctx, base+"/messages", StyleAnthropic, body, &raw)
+	var data []byte
+	var err error
+	if req.OnText != nil {
+		body["stream"] = true
+		data, err = c.streamAnthropic(ctx, base+"/messages", body, &raw, req.OnText)
+	} else {
+		data, err = c.post(ctx, base+"/messages", StyleAnthropic, body, &raw)
+	}
 	if err != nil {
 		return nil, err
 	}

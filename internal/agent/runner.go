@@ -44,7 +44,9 @@ type activeRun struct {
 }
 
 type Progress struct {
-	// thinking | thought | recall | tool_start | tool_end | note
+	// thinking | thought | recall | tool_start | tool_end | note | draft
+	// (draft: Text is the reply streamed so far, already redacted; only sent
+	// to OnProgress, not to the bus)
 	Kind       string `json:"kind"`
 	Tool       string `json:"tool,omitempty"`
 	Emoji      string `json:"emoji,omitempty"`
@@ -308,7 +310,14 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 		msgs = r.compact(ctx, res.RunID, msgs, s)
 		progress(Progress{Kind: "thinking", Iteration: iter})
 		start := time.Now()
-		resp, err := r.llm.Chat(ctx, llm.Request{Model: s.Model, Messages: msgs, Tools: defs, Temperature: &temp, MaxTokens: r.cfg.LLMMaxTokens})
+		creq := llm.Request{Model: s.Model, Messages: msgs, Tools: defs, Temperature: &temp, MaxTokens: r.cfg.LLMMaxTokens}
+		if s.StreamReplies && req.Depth == 0 && req.OnProgress != nil {
+			creq.OnText = draftStreamer(func(text string) { req.OnProgress(Progress{Kind: "draft", Text: text, Iteration: iter}) })
+		}
+		resp, err := r.llm.Chat(ctx, creq)
+		if s.StreamReplies && req.OnProgress != nil && req.Depth == 0 {
+			req.OnProgress(Progress{Kind: "draft", Text: "", Iteration: iter}) // the turn is over: drop the draft
+		}
 		if err != nil {
 			r.step(res.RunID, "llm", s.Model, "", err.Error(), "error", time.Since(start), 0)
 			runErr = err
@@ -682,4 +691,25 @@ func toolImages(out string) (string, []llm.Image) {
 		text = fmt.Sprintf("(%d image(s) attached)", len(imgs))
 	}
 	return text, imgs
+}
+
+// draftStreamer turns LLM text deltas into "reply so far" updates. Text is
+// redacted as a whole and only released up to the last whitespace, so a
+// secret is never shown half-written (before redaction could match it).
+func draftStreamer(emit func(string)) func(string) {
+	var buf strings.Builder
+	last := ""
+	return func(delta string) {
+		buf.WriteString(delta)
+		text := buf.String()
+		cut := strings.LastIndexAny(text, " \n\t")
+		if cut <= 0 {
+			return
+		}
+		shown := core.Secrets.Redact(text[:cut])
+		if shown != last {
+			last = shown
+			emit(shown)
+		}
+	}
 }

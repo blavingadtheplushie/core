@@ -80,6 +80,10 @@ type Request struct {
 	Temperature *float64  `json:"temperature,omitempty"`
 	MaxTokens   int       `json:"max_tokens,omitempty"`
 	JSONMode    bool      `json:"-"`
+	// OnText, when set, asks for a streamed reply: it receives each text
+	// delta as it arrives (Anthropic style only; other styles ignore it and
+	// answer in one go). The returned Response is the same either way.
+	OnText func(delta string) `json:"-"`
 }
 
 type Usage struct {

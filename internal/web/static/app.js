@@ -1363,7 +1363,7 @@ async function renderSettings() {
         <section class="card"><div class="card-head"><div><h3>⚙️ Behavior</h3><p>What it does on its own.</p></div></div><div class="card-body">
           ${switchRow('reflection', 'Reflect after each conversation', 'Automatically extracts lasting memories and updates people notes.', s.reflection)}
           ${switchRow('follow_threads', 'Follow threads', 'Replies in threads it has already spoken in, without being mentioned again.', s.follow_threads)}
-          ${switchRow('stream_replies', 'Stream replies', 'Shows the answer word by word in Slack while it is being written (message updated about once a second), instead of all at once at the end.', s.stream_replies)}
+          ${switchRow('stream_replies', 'Stream replies', 'Streams replies natively in Slack (chat.startStream): tool calls appear live as task cards and the answer is written as it comes. Falls back to a message updated about once a second if Slack refuses the stream.', s.stream_replies)}
           ${switchRow('channel_digest', 'Channel digests', 'Continuously summarizes the channels it reads to keep their context.', s.channel_digest)}
           ${switchRow('email_auto', 'Handle emails on its own', 'Reads every incoming email and answers it directly, with the sender’s access profile below. Auto-replies, mailing lists and no-reply senders are skipped; max 3 replies per sender per day.', s.email_auto)}
           ${switchRow('self_review', 'Daily self-review', 'Analyzes its errors and feedback, then improves autonomously.', s.self_review)}

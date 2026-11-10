@@ -36,6 +36,17 @@ type liveMessage struct {
 	dirty     bool
 	draft     string // reply streamed so far (stream_replies setting)
 	stop      chan struct{}
+
+	// Native Slack streaming (stream.go).
+	user       string // recipient of the stream (the person who asked)
+	native     bool
+	closed     bool
+	nmu        sync.Mutex // serialises stream API calls
+	sent       map[int]string
+	textIter   int
+	streamed   string
+	textBroken bool
+	anyText    bool
 }
 
 type event struct {
@@ -133,6 +144,9 @@ func richText(text string, pre bool) map[string]any {
 // ---------- progress ----------
 
 func (l *liveMessage) start(ctx context.Context) {
+	if l.b.runner != nil && l.b.runner.Settings().StreamReplies && l.startNative(ctx) {
+		return
+	}
 	opts := []slack.MsgOption{slack.MsgOptionText("Working on it…", false)}
 	if l.thread != "" {
 		opts = append(opts, slack.MsgOptionTS(l.thread))
@@ -419,6 +433,10 @@ const finalChunkSize = 1200
 // the message carrying the plan (the one to update after reflection).
 func (l *liveMessage) finish(ctx context.Context, res agent.Result) string {
 	close(l.stop)
+	if l.native {
+		// Close the stream, then replace it below with the regular final layout.
+		l.flushNative(ctx, true)
+	}
 	chunks := Chunk(ToMrkdwn(res.Output), finalChunkSize)
 	if len(chunks) == 0 {
 		chunks = []string{"🤷"}

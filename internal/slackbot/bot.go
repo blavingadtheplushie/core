@@ -41,6 +41,7 @@ type Bot struct {
 	BotUserID string
 	BotID     string
 	TeamURL   string
+	TeamID    string
 	Connected bool
 
 	mu       sync.Mutex
@@ -61,7 +62,7 @@ func (b *Bot) Start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("slack auth: %w", err)
 	}
-	b.BotUserID, b.BotID, b.TeamURL = auth.UserID, auth.BotID, auth.URL
+	b.BotUserID, b.BotID, b.TeamURL, b.TeamID = auth.UserID, auth.BotID, auth.URL, auth.TeamID
 	slog.Info("slack connected", "bot", auth.User, "team", auth.Team)
 	go b.loop(ctx)
 	go b.digestLoop(ctx)
@@ -466,6 +467,9 @@ func (b *Bot) respond(ctx context.Context, ev *slackevents.MessageEvent, files [
 	}
 
 	live := newLiveMessage(b, ev.Channel, replyThread)
+	if ev.BotID == "" {
+		live.user = ev.User
+	}
 	live.start(ctx)
 	res := b.runner.Run(ctx, agent.Request{
 		Source: "slack", Channel: ev.Channel, ChannelName: b.channelName(ctx, ev.Channel),

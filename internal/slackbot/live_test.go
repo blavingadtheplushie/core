@@ -182,3 +182,48 @@ func TestBareAnswerAndLegacy(t *testing.T) {
 		t.Errorf("legacy final layout: %s", js)
 	}
 }
+
+func TestStreamMarkdown(t *testing.T) {
+	cases := map[string]string{
+		"*bold* and _it_":         "**bold** and _it_",
+		"`a*b` *x*":               "`a*b` **x**",
+		"```\n*no*\n``` *yes*":    "```\n*no*\n``` **yes**",
+		"**already**":             "**already**",
+		"<https://x.y|link> :yay:": "<https://x.y|link> :yay:",
+	}
+	for in, want := range cases {
+		if got := streamMarkdown(in); got != want {
+			t.Errorf("streamMarkdown(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// Append-only: a longer draft keeps the shorter one's conversion as prefix.
+	a, b := streamMarkdown("hello *wor"), streamMarkdown("hello *world* `c*`")
+	if !strings.HasPrefix(b, a) {
+		t.Errorf("not append-only: %q / %q", a, b)
+	}
+}
+
+func TestNativeChunksDelta(t *testing.T) {
+	l := newTestLive()
+	l.sent = map[int]string{}
+	l.progress(agent.Progress{Kind: "thinking", Iteration: 1})
+	l.progress(agent.Progress{Kind: "tool_start", Tool: "web_search", Category: "web", Emoji: "🔎", Label: "Web search: x"})
+	if c := l.nativeChunks(); len(c) != 1 {
+		t.Fatalf("want 1 task chunk, got %d", len(c))
+	}
+	if c := l.nativeChunks(); len(c) != 0 {
+		t.Fatalf("unchanged state must send nothing, got %d", len(c))
+	}
+	l.progress(agent.Progress{Kind: "tool_end", Tool: "web_search", Category: "web", Emoji: "🔎", Label: "Web search: x", OK: true, Text: "ok"})
+	l.progress(agent.Progress{Kind: "thinking", Iteration: 2})
+	l.progress(agent.Progress{Kind: "draft", Text: "Voici *la"})
+	c := l.nativeChunks()
+	if len(c) != 2 {
+		t.Fatalf("want task update + text, got %d", len(c))
+	}
+	l.progress(agent.Progress{Kind: "draft", Text: "Voici *la réponse*"})
+	c = l.nativeChunks()
+	if len(c) != 1 || c[0].(slack.MarkdownTextChunk).Text != " réponse**" {
+		t.Fatalf("bad text delta: %+v", c)
+	}
+}

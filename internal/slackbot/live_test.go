@@ -204,6 +204,8 @@ func TestStreamMarkdown(t *testing.T) {
 }
 
 func TestNativeChunksDelta(t *testing.T) {
+	streamAnswerText = true
+	defer func() { streamAnswerText = false }()
 	l := newTestLive()
 	l.sent = map[int]string{}
 	l.progress(agent.Progress{Kind: "thinking", Iteration: 1})
@@ -231,6 +233,8 @@ func TestNativeChunksDelta(t *testing.T) {
 // Narration written before a tool call must not leak into the streamed
 // answer: it goes to the plan as a Thinking card instead.
 func TestNativeNarrationGoesToPlan(t *testing.T) {
+	streamAnswerText = true
+	defer func() { streamAnswerText = false }()
 	l := newTestLive()
 	l.sent = map[int]string{}
 	l.progress(agent.Progress{Kind: "thinking", Iteration: 1})

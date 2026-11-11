@@ -93,7 +93,11 @@ func (l *liveMessage) nativeChunks() []slack.StreamChunk {
 	// plan, but appendStream cannot take text back. So a turn's text is only
 	// streamed once it looks like a real answer; narration stays hidden and
 	// shows up as a "Thinking" card when the turn ends with tool calls.
-	if l.streamed == "" && !looksLikeAnswer(l.draft) {
+	// Answer text is no longer streamed: Slack keeps the streamed
+	// markdown_text when the message is later replaced by chat.update, so
+	// the answer showed up twice (partial streamed copy + final blocks).
+	// Only the live plan is streamed; the answer arrives with the final layout.
+	if !streamAnswerText || (l.streamed == "" && !looksLikeAnswer(l.draft)) {
 		return chunks
 	}
 	if conv := streamMarkdown(l.draft); !l.textBroken && conv != "" {
@@ -113,6 +117,10 @@ func (l *liveMessage) nativeChunks() []slack.StreamChunk {
 // streamAnswerAfter is how much text a turn needs before it is streamed as
 // the answer: narration next to tool calls is almost always one short line.
 const streamAnswerAfter = 240
+
+// streamAnswerText toggles streaming the answer text itself (off: it was
+// duplicated in the final message).
+var streamAnswerText = false
 
 func looksLikeAnswer(draft string) bool {
 	d := strings.TrimSpace(draft)

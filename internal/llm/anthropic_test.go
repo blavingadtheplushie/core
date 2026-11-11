@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -67,7 +68,7 @@ func TestChatAnthropic(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if body["system"] != "sys" || body["max_tokens"] != float64(500) {
+	if fmt.Sprint(body["system"]) != "[map[cache_control:map[type:ephemeral] text:sys type:text]]" || body["max_tokens"] != float64(500) {
 		t.Errorf("request body: %v", body)
 	}
 	// Temperature is deliberately not sent in Anthropic mode (recent models

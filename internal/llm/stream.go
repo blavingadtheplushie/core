@@ -91,10 +91,7 @@ func parseAnthropicSSE(r io.Reader, out *anthResponse, onText func(string)) ([]b
 			PartialJSON string `json:"partial_json"`
 			StopReason  string `json:"stop_reason"`
 		} `json:"delta"`
-		Usage *struct {
-			InputTokens  int `json:"input_tokens"`
-			OutputTokens int `json:"output_tokens"`
-		} `json:"usage"`
+		Usage *anthUsage `json:"usage"`
 		Error *struct {
 			Type    string `json:"type"`
 			Message string `json:"message"`
@@ -126,14 +123,10 @@ func parseAnthropicSSE(r io.Reader, out *anthResponse, onText func(string)) ([]b
 		switch e.Type {
 		case "message_start":
 			var m struct {
-				Usage struct {
-					InputTokens  int `json:"input_tokens"`
-					OutputTokens int `json:"output_tokens"`
-				} `json:"usage"`
+				Usage anthUsage `json:"usage"`
 			}
 			if json.Unmarshal(e.Message, &m) == nil {
-				out.Usage.InputTokens = m.Usage.InputTokens
-				out.Usage.OutputTokens = m.Usage.OutputTokens
+				out.Usage = m.Usage
 			}
 		case "content_block_start":
 			b := anthBlock{}
@@ -177,6 +170,12 @@ func parseAnthropicSSE(r io.Reader, out *anthResponse, onText func(string)) ([]b
 			if e.Usage != nil {
 				if e.Usage.InputTokens > 0 {
 					out.Usage.InputTokens = e.Usage.InputTokens
+				}
+				if e.Usage.CacheReadInputTokens > 0 {
+					out.Usage.CacheReadInputTokens = e.Usage.CacheReadInputTokens
+				}
+				if e.Usage.CacheCreationInputTokens > 0 {
+					out.Usage.CacheCreationInputTokens = e.Usage.CacheCreationInputTokens
 				}
 				out.Usage.OutputTokens = e.Usage.OutputTokens
 			}

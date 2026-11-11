@@ -89,6 +89,10 @@ type Request struct {
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
+	// Prompt caching (Anthropic): tokens read from / written to the cache,
+	// already included in PromptTokens.
+	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
 }
 
 type Response struct {

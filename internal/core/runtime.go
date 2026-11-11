@@ -130,7 +130,7 @@ type Approvals struct {
 	reg      *Registry
 	mu       sync.Mutex
 	waiters  map[string]chan string
-	notifier ApprovalNotifier
+	notifiers []ApprovalNotifier
 	Timeout  time.Duration
 }
 
@@ -141,7 +141,9 @@ func NewApprovals(st *store.Store, bus *Bus, reg *Registry) *Approvals {
 	return a
 }
 
-func (a *Approvals) SetNotifier(n ApprovalNotifier) { a.notifier = n }
+// SetNotifier adds a surface that shows approval prompts (Slack, Discord…).
+// Every surface gets the prompt; the first decision wins.
+func (a *Approvals) SetNotifier(n ApprovalNotifier) { a.notifiers = append(a.notifiers, n) }
 
 // Request blocks until a human decides, the timeout elapses or ctx ends.
 func (a *Approvals) Request(ctx context.Context, rc *RunContext, tool *Tool, args json.RawMessage) error {
@@ -166,11 +168,19 @@ func (a *Approvals) Request(ctx context.Context, rc *RunContext, tool *Tool, arg
 		ap.ID, ap.RunID, ap.Tool, ap.Args, ap.Summary, ap.Status, ap.RequestedBy, ap.RequesterID, ap.CreatedAt); err != nil {
 		return err
 	}
-	var slackChannel, slackTS string
-	if a.notifier != nil {
-		slackChannel, slackTS = a.notifier.NotifyApproval(ap)
-		if slackTS != "" {
-			a.st.DB.Exec(`UPDATE approvals SET slack_channel = ?, slack_ts = ? WHERE id = ?`, slackChannel, slackTS, ap.ID)
+	type posted struct {
+		n           ApprovalNotifier
+		channel, ts string
+	}
+	var notes []posted
+	for _, n := range a.notifiers {
+		ch, ts := n.NotifyApproval(ap)
+		if ts == "" {
+			continue
+		}
+		notes = append(notes, posted{n, ch, ts})
+		if ch != "discord" {
+			a.st.DB.Exec(`UPDATE approvals SET slack_channel = ?, slack_ts = ? WHERE id = ?`, ch, ts, ap.ID)
 		}
 	}
 	a.bus.Publish("approval.created", ap)
@@ -191,11 +201,13 @@ func (a *Approvals) Request(ctx context.Context, rc *RunContext, tool *Tool, arg
 		a.st.DB.Exec(`UPDATE approvals SET status = 'expired', decided_at = ? WHERE id = ? AND status = 'pending'`, store.Now(), ap.ID)
 	}
 	ap.Status = decision
-	if a.notifier != nil && slackTS != "" {
+	if len(notes) > 0 {
 		var by string
 		a.st.DB.QueryRow(`SELECT COALESCE(decided_by,'') FROM approvals WHERE id = ?`, ap.ID).Scan(&by)
 		ap.DecidedBy = by
-		a.notifier.ResolveApproval(ap, slackChannel, slackTS)
+		for _, p := range notes {
+			p.n.ResolveApproval(ap, p.channel, p.ts)
+		}
 	}
 	a.bus.Publish("approval.decided", ap)
 	switch decision {

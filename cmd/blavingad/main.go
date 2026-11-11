@@ -276,6 +276,7 @@ func serve() int {
 	// vault://DISCORD_BOT_TOKEN/password; idle until it exists).
 	if os.Getenv("DISCORD_DISABLED") == "" {
 		db := dcbridge.New(st, runner, access, func(n core.Notice) { post("", "", n) })
+		approvals.SetNotifier(dcbridge.NewApprover(db, approvals))
 		go db.Run(ctx)
 	}
 

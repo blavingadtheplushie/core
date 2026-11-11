@@ -1,6 +1,7 @@
 // Package discord bridges Blavingad's Discord bot (installed by people as a
 // user app) to agent runs: DMs to the bot and the /ask slash command (usable
-// anywhere the user is, thanks to the user install). Approvals stay on Slack.
+// anywhere the user is, thanks to the user install). Approval prompts are
+// also mirrored, with buttons, to linked users allowed to decide them.
 package discord
 
 import (
@@ -34,8 +35,9 @@ type Bridge struct {
 	Access *core.Access
 	Notify func(n core.Notice)
 
-	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	mu       sync.Mutex
+	locks    map[string]*sync.Mutex
+	approver *Approver
 }
 
 func New(st *store.Store, r *agent.Runner, a *core.Access, notify func(core.Notice)) *Bridge {
@@ -318,7 +320,7 @@ func (b *Bridge) profile(u user) (string, core.Profile) {
 }
 
 const formatNote = "Discord formatting: Discord markdown (**bold**, *italic*, `code`, ``` blocks, [text](url) links, - bullets); no Slack mrkdwn (no <url|text>, no :custom_emoji: codes, use real unicode emojis sparingly), no Block Kit. Keep it short like a chat message. " +
-	"Approval buttons for sensitive tools are posted on Slack, in your home channel, not on Discord."
+	"Approval prompts for sensitive tools are posted on Slack and also sent as Discord DMs with buttons to linked people allowed to approve."
 
 func (b *Bridge) extra(where, slackID string) string {
 	s := "## Discord conversation\nYou are answering on Discord (" + where + "). Your final answer is sent back there automatically: don't call discord_send to reply to this conversation. " + formatNote
@@ -389,14 +391,15 @@ func (b *Bridge) handleInteraction(ctx context.Context, d json.RawMessage) {
 		} `json:"member"`
 		User *user `json:"user"`
 		Data struct {
-			Name    string `json:"name"`
+			Name     string `json:"name"`
+			CustomID string `json:"custom_id"`
 			Options []struct {
 				Name  string `json:"name"`
 				Value any    `json:"value"`
 			} `json:"options"`
 		} `json:"data"`
 	}
-	if json.Unmarshal(d, &in) != nil || in.Type != 2 || in.Data.Name != "ask" {
+	if json.Unmarshal(d, &in) != nil {
 		return
 	}
 	var u user
@@ -404,6 +407,13 @@ func (b *Bridge) handleInteraction(ctx context.Context, d json.RawMessage) {
 		u = *in.User
 	} else if in.Member != nil {
 		u = in.Member.User
+	}
+	if in.Type == 3 && strings.HasPrefix(in.Data.CustomID, "apr:") {
+		b.handleButton(ctx, in.ID, in.Token, in.Data.CustomID, u)
+		return
+	}
+	if in.Type != 2 || in.Data.Name != "ask" {
+		return
 	}
 	prompt := ""
 	for _, o := range in.Data.Options {

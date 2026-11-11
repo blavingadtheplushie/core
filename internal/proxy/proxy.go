@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"blavingad/internal/store"
@@ -19,9 +20,11 @@ type Proxy struct {
 	client    *http.Client
 	Cooldown  time.Duration
 
-	mu     sync.Mutex
-	downTo map[string]time.Time // upstream → cooling down until
-	lastEr map[string]string
+	mu        sync.Mutex
+	downTo    map[string]time.Time // upstream → cooling down until
+	lastEr    map[string]string
+	internal  string
+	listening atomic.Bool
 }
 
 func New(st *store.Store, resolve Resolver, configKey string) *Proxy {

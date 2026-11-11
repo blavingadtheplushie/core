@@ -31,9 +31,12 @@ type Settings struct {
 	// StreamReplies shows the answer word by word in Slack while the model
 	// writes it, instead of all at once at the end.
 	StreamReplies bool `json:"stream_replies"`
+	// UseProxy routes the agent's own LLM calls through its LLM proxy
+	// (multi-upstream fallback) instead of calling the endpoint directly.
+	UseProxy bool `json:"use_proxy"`
 }
 
-var SettingKeys = []string{"api_style", "base_url", "model", "fast_model", "temperature", "max_iterations", "reflection", "self_review", "self_review_cron", "follow_threads", "email_auto", "email_profile", "home_channel", "channel_digest", "extra_prompt", "bot_reply_limit", "stream_replies"}
+var SettingKeys = []string{"api_style", "base_url", "model", "fast_model", "temperature", "max_iterations", "reflection", "self_review", "self_review_cron", "follow_threads", "email_auto", "email_profile", "home_channel", "channel_digest", "extra_prompt", "bot_reply_limit", "stream_replies", "use_proxy"}
 
 func LoadSettings(st *store.Store, cfg *config.Config) Settings {
 	get := func(k, def string) string { return st.GetSetting("agent."+k, def) }
@@ -71,5 +74,6 @@ func LoadSettings(st *store.Store, cfg *config.Config) Settings {
 		ExtraPrompt:    get("extra_prompt", ""),
 		BotReplyLimit:  botLimit,
 		StreamReplies:  b("stream_replies", false),
+		UseProxy:       b("use_proxy", false),
 	}
 }

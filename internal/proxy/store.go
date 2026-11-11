@@ -217,6 +217,9 @@ func (p *Proxy) RevokeKey(ref string, del bool) error {
 }
 
 func (p *Proxy) lookupKey(plain string) (Key, bool) {
+	if p.isInternal(plain) {
+		return Key{ID: InternalKeyID, Name: "blavingad (internal)", Enabled: true}, true
+	}
 	var k Key
 	var m string
 	var en int

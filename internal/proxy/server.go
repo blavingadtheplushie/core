@@ -3,6 +3,7 @@ package proxy
 import (
 	"context"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 )
@@ -20,8 +21,18 @@ func (p *Proxy) ListenAndServe(ctx context.Context, addr string) {
 		defer cancel()
 		srv.Shutdown(sctx)
 	}()
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		slog.Error("llm proxy disabled", "err", err)
+		return
+	}
+	p.listening.Store(true)
+	defer p.listening.Store(false)
 	slog.Info("llm proxy listening", "addr", addr)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		slog.Error("llm proxy disabled", "err", err)
 	}
 }
+
+// Listening reports whether the proxy listener is up.
+func (p *Proxy) Listening() bool { return p.listening.Load() }

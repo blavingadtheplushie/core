@@ -113,6 +113,9 @@ type Client struct {
 	// Endpoint, when set, is consulted on every call so the API style and
 	// base URL can be switched at runtime (from the dashboard settings).
 	Endpoint func() (style, baseURL string)
+	// KeyFunc, when set and non-empty, overrides APIKey per call (used to
+	// route the agent through its own LLM proxy with an internal key).
+	KeyFunc func() string
 }
 
 // API styles.
@@ -276,16 +279,22 @@ func (c *Client) Embed(ctx context.Context, model string, inputs []string) ([][]
 // the extra configured headers.
 func (c *Client) headers(req *http.Request, style string) {
 	req.Header.Set("Accept", "application/json") // some gateways (Snowflake…) require it
-	if c.APIKey != "" {
+	key := c.APIKey
+	if c.KeyFunc != nil {
+		if k := c.KeyFunc(); k != "" {
+			key = k
+		}
+	}
+	if key != "" {
 		if style == StyleAnthropic {
-			req.Header.Set("x-api-key", c.APIKey)
+			req.Header.Set("x-api-key", key)
 			// Gateways speaking the Anthropic format (LiteLLM, Snowflake,
 			// proxies) usually authenticate with a bearer token instead.
 			if req.URL.Host != "api.anthropic.com" {
-				req.Header.Set("Authorization", "Bearer "+c.APIKey)
+				req.Header.Set("Authorization", "Bearer "+key)
 			}
 		} else {
-			req.Header.Set("Authorization", "Bearer "+c.APIKey)
+			req.Header.Set("Authorization", "Bearer "+key)
 		}
 	}
 	if style == StyleAnthropic {

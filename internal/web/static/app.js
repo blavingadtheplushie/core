@@ -59,6 +59,7 @@ const ICONS = {
   arrowLeft: '<path d="M19 12H5M11 19l-7-7 7-7"/>',
   check: '<path d="m4 12 5 5L20 6"/>',
   lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  route: '<circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/>',
   spark: '<path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8Z"/>',
   refresh: '<path d="M20 11a8 8 0 1 0-2.3 6.3M20 4v7h-7"/>',
@@ -424,7 +425,7 @@ function renderLogin(error = '') {
 const NAV = [
   ['Workshop', [['dashboard', '#/', 'dashboard', 'Overview'], ['chat', '#/chat', 'chat', 'Chat'], ['runs', '#/runs', 'runs', 'Runs'], ['approvals', '#/approvals', 'hand', 'Approvals']]],
   ['Brain', [['memory', '#/memory', 'brain', 'Memory'], ['tools', '#/tools', 'tool', 'Tools'], ['skills', '#/skills', 'book', 'Persona & skills'], ['evolution', '#/evolution', 'dna', 'Evolution']]],
-  ['Actions', [['schedules', '#/schedules', 'clock', 'Tasks'], ['deployments', '#/deployments', 'rocket', 'Deployments'], ['mail', '#/mail', 'mail', 'Mailbox']]],
+  ['Actions', [['schedules', '#/schedules', 'clock', 'Tasks'], ['deployments', '#/deployments', 'rocket', 'Deployments'], ['proxy', '#/proxy', 'route', 'LLM proxy'], ['mail', '#/mail', 'mail', 'Mailbox']]],
   ['System', [['access', '#/access', 'shield', 'Access'], ['vault', '#/vault', 'lock', 'Vault'], ['audit', '#/audit', 'audit', 'Audit log'], ['settings', '#/settings', 'settings', 'Settings']]],
 ];
 
@@ -1264,6 +1265,75 @@ async function renderDeployments() {
     ${historyRows.length ? `<section class="card"><div class="card-head"><div><h3>History</h3><p>Previous deployments.</p></div></div><div class="table-wrap"><table class="data"><thead><tr><th>When</th><th>Type</th><th>Name</th><th>URL</th><th>Status</th></tr></thead><tbody>${historyRows.map((d) => `<tr><td class="nowrap small">${esc(fmtDateTime(d.created_at))}</td><td class="small">${esc((DEPLOY_KINDS[d.kind] || ['', d.kind])[1])}</td><td>${esc(d.name)}</td><td class="truncate-cell small">${d.url ? `<a href="${esc(d.url)}" target="_blank" rel="noopener noreferrer">${esc(d.url)}</a>` : '—'}</td><td>${deployStatus(d.status)}</td></tr>`).join('')}</tbody></table></div></section>` : ''}`;
 }
 
+/* ---------- LLM proxy ---------- */
+async function renderProxy() {
+  const seq = ++state.routeSeq;
+  setNav('proxy');
+  setCrumbs('LLM proxy');
+  const view = document.getElementById('view');
+  let d;
+  try { d = await api('/proxy'); } catch (error) { view.innerHTML = `${pageHead('LLM proxy', '', '', 'Actions')}${errorState(error.message)}`; return; }
+  if (seq !== state.routeSeq) return;
+  state.cache.proxy = d;
+  const health = Object.fromEntries((d.health || []).map((h) => [h.name, h]));
+  const stats = Object.fromEntries((d.stats || []).map((r) => [r.upstream, r]));
+  const ups = d.upstreams || [];
+  const maps = d.mappings || [];
+  const keys = d.keys || [];
+  const base = d.public_url || d.local_url || '';
+  const upState = (u) => !u.enabled ? badge('off', 'plain') : health[u.name]?.down ? badge('cooling down', 'warn') : badge('on', 'ok');
+  const internal = d.internal?.attempts ? d.internal : null;
+  view.innerHTML = `${pageHead('LLM proxy', `OpenAI/Anthropic-compatible gateway with automatic fallback. ${d.listening ? `Listening on <code>${esc(d.addr)}</code>` : 'Not listening'}${base ? ` · base URL <code>${esc(base)}</code>` : ''}. Endpoints <code>/v1/chat/completions</code>, <code>/v1/messages</code>, <code>/v1/models</code>.`, `<button class="btn" data-action="proxy-upstream-new">${icon('plus', 'btn-icon')} Upstream</button><button class="btn primary" data-action="proxy-key-new">${icon('plus', 'btn-icon')} API key</button>`, 'Actions')}
+    <section class="card" style="margin-bottom:16px"><div class="card-head"><div><h3>Upstreams</h3><p>Tried in priority order (lowest first). On 429/402/401/403/5xx, network errors or quota messages the next one is used, and the failing one goes last for 2 min. An upstream only serves requests in its own API style.</p></div></div>
+      <div class="card-body flush">${ups.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Prio</th><th>Name</th><th>Style</th><th>Base URL</th><th>Key</th><th>Models</th><th>24 h</th><th>State</th><th></th></tr></thead><tbody>${ups.map((u) => {
+        const st = stats[u.name];
+        const err = health[u.name]?.last_error;
+        return `<tr><td class="small">${fmtNum(u.priority)}</td><td><div class="link-title">${esc(u.name)}</div>${err ? `<div class="link-target" title="${esc(err)}">${esc(truncate(err, 60))}</div>` : ''}</td><td class="small">${esc(u.style)}</td><td class="truncate-cell small mono">${esc(u.base_url)}</td><td class="small"><code class="small">${esc(u.key_ref || 'none')}</code></td><td class="small">${(u.models || []).length ? (u.models || []).map((m) => `<code class="small">${esc(m)}</code>`).join(' ') : 'any'}</td><td class="small nowrap">${st ? `${fmtNum(st.ok)}/${fmtNum(st.attempts)} · ${fmtNum(st.avg_ms)} ms` : '—'}</td><td>${upState(u)}</td>
+          <td class="actions"><div class="action-row"><button class="icon-btn" data-action="proxy-upstream-edit" data-id="${esc(u.name)}" aria-label="Edit" title="Edit">${icon('edit')}</button><button class="icon-btn danger" data-action="proxy-upstream-delete" data-id="${esc(u.name)}" aria-label="Delete" title="Delete">${icon('trash')}</button></div></td></tr>`;
+      }).join('')}</tbody></table></div>` : emptyState('No upstream', 'Add a provider base URL with its key (as a vault:// reference).', '<button class="btn primary" data-action="proxy-upstream-new">Add an upstream</button>')}</div></section>
+    <section class="card" style="margin-bottom:16px"><div class="card-head"><div><h3>Model aliases</h3><p>A public model name mapped to the real model on each upstream (<code>*</code> = every upstream). Once an alias has mappings, only those upstreams serve it.</p></div></div>
+      <form class="card-body" id="proxy-map-form" style="padding-bottom:14px"><div class="row wrap" style="gap:8px">
+        <input class="input sm mono" name="alias" placeholder="alias, e.g. opus" required style="width:160px" aria-label="Alias">
+        <select class="select sm" name="upstream" aria-label="Upstream"><option value="*">* (every upstream)</option>${ups.map((u) => `<option value="${esc(u.name)}">${esc(u.name)}</option>`).join('')}</select>
+        <input class="input sm mono" name="model" placeholder="real model on that upstream" required style="flex:1;min-width:200px" aria-label="Model">
+        <button class="btn sm primary" type="submit">Map</button></div></form>
+      ${maps.length ? `<div class="card-body flush"><div class="table-wrap"><table class="data"><thead><tr><th>Alias</th><th>Upstream</th><th>Model</th><th></th></tr></thead><tbody>${maps.map((m) => `<tr><td><code>${esc(m.alias)}</code></td><td class="small">${esc(m.upstream)}</td><td class="small mono">${esc(m.model)}</td><td class="actions"><button class="icon-btn danger" data-action="proxy-map-delete" data-id="${esc(m.alias)}" data-upstream="${esc(m.upstream)}" aria-label="Delete" title="Delete">${icon('trash')}</button></td></tr>`).join('')}</tbody></table></div></div>` : ''}</section>
+    <section class="card"><div class="card-head"><div><h3>API keys</h3><p>Client keys (<code>sk-blv-…</code>). Only a hash is stored; the key is shown once when created. Send it as <code>Authorization: Bearer</code> or <code>x-api-key</code>.${internal ? ` The agent’s own calls (internal key): ${fmtNum(internal.ok)}/${fmtNum(internal.attempts)} in 24 h.` : ''}</p></div></div>
+      <div class="card-body flush">${keys.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Name</th><th>Prefix</th><th>Models</th><th>Requests</th><th>Tokens in / out</th><th>Last used</th><th>State</th><th></th></tr></thead><tbody>${keys.map((k) => `<tr><td><div class="link-title">${esc(k.name)}</div><div class="link-target">${esc(k.created_by || '')} · ${esc(relative(k.created_at))}</div></td><td><code class="small">${esc(k.prefix)}…</code></td><td class="small">${(k.models || []).length ? (k.models || []).map((m) => `<code class="small">${esc(m)}</code>`).join(' ') : 'all'}</td><td class="small">${fmtNum(k.requests)}</td><td class="small nowrap">${fmtNum(k.input_tokens)} / ${fmtNum(k.output_tokens)}</td><td class="small nowrap">${k.last_used_at ? esc(relative(k.last_used_at)) : '—'}</td><td>${k.enabled ? badge('active', 'ok') : badge('revoked', 'plain')}</td>
+        <td class="actions"><div class="action-row">${k.enabled ? `<button class="icon-btn" data-action="proxy-key-revoke" data-id="${esc(k.id)}" aria-label="Revoke" title="Revoke">${icon('stop')}</button>` : ''}<button class="icon-btn danger" data-action="proxy-key-delete" data-id="${esc(k.id)}" aria-label="Delete" title="Delete">${icon('trash')}</button></div></td></tr>`).join('')}</tbody></table></div>` : emptyState('No key yet', 'Create one to let an app use the proxy.', '<button class="btn primary" data-action="proxy-key-new">Create a key</button>')}</div></section>
+    <p class="hint" style="margin-top:12px">Route the agent itself through this proxy in Settings → Behavior → “Use the LLM proxy”.</p>`;
+}
+
+function proxyUpstreamModal(u = null) {
+  const v = u || { name: '', style: 'openai', base_url: '', key_ref: '', models: [], priority: 100, enabled: true, headers: {} };
+  showModal(`${modalHead(u ? `Edit ${u.name}` : 'New upstream', 'The key must be a vault:// reference (store it in the Vault first), or “config” for the agent’s own LLM key.')}
+    <form id="proxy-upstream-form" ${u ? 'data-edit="1"' : ''}><div class="modal-body"><div class="form-grid">
+      <div class="field"><label class="label" for="pu-name">Name</label><input class="input mono" id="pu-name" name="name" value="${esc(v.name)}" required ${u ? 'readonly' : 'autofocus'} pattern="[a-z0-9][a-z0-9._\\-]{0,40}"></div>
+      <div class="field"><label class="label" for="pu-style">API style</label><select class="select" id="pu-style" name="style"><option value="openai" ${v.style === 'openai' ? 'selected' : ''}>openai (/chat/completions)</option><option value="anthropic" ${v.style === 'anthropic' ? 'selected' : ''}>anthropic (/messages)</option></select></div>
+      <div class="field span-2"><label class="label" for="pu-base">Base URL <span class="hint-inline">including /v1</span></label><input class="input mono" id="pu-base" name="base_url" value="${esc(v.base_url)}" required placeholder="https://api.openai.com/v1"></div>
+      <div class="field span-2"><label class="label" for="pu-key">Key reference</label><input class="input mono" id="pu-key" name="key_ref" value="${esc(v.key_ref)}" placeholder="vault://OPENROUTER_API_KEY/password" list="pu-key-list" autocomplete="off"><datalist id="pu-key-list"><option value="config"></option></datalist></div>
+      <div class="field"><label class="label" for="pu-prio">Priority <span class="hint-inline">lower = first</span></label><input class="input" id="pu-prio" name="priority" type="number" value="${esc(v.priority)}"></div>
+      <div class="field"><label class="label" for="pu-models">Accepted models <span class="hint-inline">comma separated, empty = any</span></label><input class="input mono" id="pu-models" name="models" value="${esc((v.models || []).join(', '))}"></div>
+      <div class="field span-2"><label class="label" for="pu-headers">Extra headers <span class="hint-inline">JSON, non-secret</span></label><input class="input mono" id="pu-headers" name="headers" value="${esc(JSON.stringify(v.headers || {}))}"></div>
+      <label class="check-row span-2"><input type="checkbox" name="enabled" ${v.enabled ? 'checked' : ''}> Enabled</label>
+    </div></div><div class="modal-foot"><button class="btn" type="button" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
+}
+
+function proxyKeyModal() {
+  showModal(`${modalHead('New API key', 'The key is shown once. Store it somewhere safe.')}
+    <form id="proxy-key-form"><div class="modal-body"><div class="form-grid">
+      <div class="field span-2"><label class="label" for="pk-name">Name</label><input class="input" id="pk-name" name="name" required autofocus placeholder="who / which app"></div>
+      <div class="field span-2"><label class="label" for="pk-models">Allowed models <span class="hint-inline">comma separated, empty = all</span></label><input class="input mono" id="pk-models" name="models" placeholder="opus, sonnet"></div>
+    </div></div><div class="modal-foot"><button class="btn" type="button" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Create</button></div></form>`);
+}
+
+function proxyKeyShown(secret, base) {
+  showModal(`${modalHead('Your new key', 'Copy it now: it will never be shown again.')}
+    <div class="modal-body"><div class="field"><label class="label">API key</label><input class="input mono" readonly value="${esc(secret)}" onclick="this.select()"></div>
+    ${base ? `<p class="hint">Base URL: <code>${esc(base)}</code></p>` : ''}</div>
+    <div class="modal-foot"><button class="btn" data-action="copy-text" data-text="${esc(secret)}">${icon('copy', 'btn-icon')} Copy</button><button class="btn primary" data-action="close-modal">Done</button></div>`);
+}
+
 /* ---------- Mail ---------- */
 async function renderMail() {
   const seq = ++state.routeSeq;
@@ -1363,6 +1433,7 @@ async function renderSettings() {
         <section class="card"><div class="card-head"><div><h3>⚙️ Behavior</h3><p>What it does on its own.</p></div></div><div class="card-body">
           ${switchRow('reflection', 'Reflect after each conversation', 'Automatically extracts lasting memories and updates people notes.', s.reflection)}
           ${switchRow('follow_threads', 'Follow threads', 'Replies in threads it has already spoken in, without being mentioned again.', s.follow_threads)}
+          ${switchRow('use_proxy', 'Use the LLM proxy', 'Sends its own model calls through the LLM proxy, so they fall back to the next upstream when one fails (quota, rate limit, outage). Ignored when the proxy is off or has no upstream for the API style.', s.use_proxy)}
           ${switchRow('stream_replies', 'Stream replies', 'Streams replies natively in Slack (chat.startStream): tool calls appear live as task cards and the answer is written as it comes. Falls back to a message updated about once a second if Slack refuses the stream.', s.stream_replies)}
           ${switchRow('channel_digest', 'Channel digests', 'Continuously summarizes the channels it reads to keep their context.', s.channel_digest)}
           ${switchRow('email_auto', 'Handle emails on its own', 'Reads every incoming email and answers it directly, with the sender’s access profile below. Auto-replies, mailing lists and no-reply senders are skipped; max 3 replies per sender per day.', s.email_auto)}
@@ -1404,7 +1475,7 @@ async function saveSettings(form, quiet = false) {
   const fd = new FormData(form);
   const body = {};
   for (const key of ['api_style', 'base_url', 'model', 'fast_model', 'temperature', 'max_iterations', 'extra_prompt', 'self_review_cron', 'email_profile', 'home_channel', 'bot_reply_limit']) body[key] = String(fd.get(key) ?? '').trim();
-  for (const key of ['reflection', 'follow_threads', 'stream_replies', 'channel_digest', 'email_auto', 'self_review']) body[key] = form.querySelector(`[name="${key}"]`).checked;
+  for (const key of ['reflection', 'follow_threads', 'use_proxy', 'stream_replies', 'channel_digest', 'email_auto', 'self_review']) body[key] = form.querySelector(`[name="${key}"]`).checked;
   try {
     await api('/settings', { method: 'PATCH', body });
     if (!quiet) toast('Settings saved ✨');
@@ -1779,6 +1850,19 @@ document.addEventListener('click', async (event) => {
         confirmDialog({ title: 'Remove from the allowlist?', message: `This person will get the default profile (${state.cache.access?.default || 'guest'}).`, confirm: 'Remove', onConfirm: async () => { await api(`/access/members/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast('Removed from the allowlist'); await renderAccess(); } });
         break;
       case 'llm-test': await testModel(target); break;
+      case 'proxy-upstream-new': proxyUpstreamModal(); break;
+      case 'proxy-upstream-edit': proxyUpstreamModal((state.cache.proxy?.upstreams || []).find((u) => u.name === id)); break;
+      case 'proxy-upstream-delete':
+        confirmDialog({ title: `Delete upstream ${id}?`, message: 'Its model mappings are removed too.', confirm: 'Delete', onConfirm: async () => { await api(`/proxy/upstreams/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast('Upstream deleted'); await renderProxy(); } });
+        break;
+      case 'proxy-map-delete': await api(`/proxy/mappings?${new URLSearchParams({ alias: id, upstream: target.dataset.upstream || '' })}`, { method: 'DELETE' }); toast('Mapping removed'); await renderProxy(); break;
+      case 'proxy-key-new': proxyKeyModal(); break;
+      case 'proxy-key-revoke':
+        confirmDialog({ title: 'Revoke this key?', message: 'Apps using it get 401 right away. Usage stays visible.', confirm: 'Revoke', onConfirm: async () => { await api(`/proxy/keys/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast('Key revoked'); await renderProxy(); } });
+        break;
+      case 'proxy-key-delete':
+        confirmDialog({ title: 'Delete this key?', message: 'It is removed with its counters.', confirm: 'Delete', onConfirm: async () => { await api(`/proxy/keys/${encodeURIComponent(id)}?delete=1`, { method: 'DELETE' }); toast('Key deleted'); await renderProxy(); } });
+        break;
       case 'tunnel-remove':
         confirmDialog({ title: `Unpublish ${id}?`, message: 'The route and its DNS record (if it points to the tunnel) are deleted.', confirm: 'Unpublish', onConfirm: async () => { const res = await api(`/tunnel/routes?${new URLSearchParams({ hostname: id })}`, { method: 'DELETE' }); toast(`🚇 ${res.message}`); await renderDeployments(); } });
         break;
@@ -1892,6 +1976,18 @@ document.addEventListener('submit', async (event) => {
       const res = await api('/tunnel/routes', { method: 'POST', body: { hostname: fd.get('hostname'), service: fd.get('service'), path: fd.get('path') } });
       toast(`🚇 ${res.message}`); await renderDeployments();
     });
+  } else if (form.id === 'proxy-upstream-form') {
+    await run(async () => {
+      let headers = {};
+      try { headers = JSON.parse(String(fd.get('headers') || '{}') || '{}'); } catch { throw new Error('Extra headers must be a JSON object'); }
+      const models = String(fd.get('models') || '').split(',').map((m) => m.trim()).filter(Boolean);
+      await api('/proxy/upstreams', { method: 'POST', body: { name: fd.get('name'), style: fd.get('style'), base_url: fd.get('base_url'), key_ref: String(fd.get('key_ref') || '').trim(), priority: Number(fd.get('priority')) || 100, models, headers, enabled: form.querySelector('[name="enabled"]').checked } });
+      closeModal(); toast('🔀 Upstream saved'); await renderProxy();
+    });
+  } else if (form.id === 'proxy-map-form') {
+    await run(async () => { await api('/proxy/mappings', { method: 'POST', body: { alias: fd.get('alias'), upstream: fd.get('upstream'), model: fd.get('model') } }); toast('🔀 Alias mapped'); await renderProxy(); });
+  } else if (form.id === 'proxy-key-form') {
+    await run(async () => { const res = await api('/proxy/keys', { method: 'POST', body: { name: fd.get('name'), models: fd.get('models') } }); const d = state.cache.proxy || {}; proxyKeyShown(res.secret, d.public_url || d.local_url); await renderProxy(); });
   } else if (form.id === 'vault-form') {
     await run(() => saveVaultItem(form));
   } else if (form.id === 'profile-form') {
@@ -1940,6 +2036,7 @@ async function route() {
     case 'schedules': return renderSchedules();
     case 'deployments': return renderDeployments();
     case 'mail': return renderMail();
+    case 'proxy': return renderProxy();
     case 'access': return renderAccess();
     case 'vault': return renderVault();
     case 'audit': return renderAudit();

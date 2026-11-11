@@ -21,13 +21,13 @@ import (
 	"blavingad/internal/agent"
 	"blavingad/internal/config"
 	"blavingad/internal/core"
+	dcbridge "blavingad/internal/discord"
 	"blavingad/internal/llm"
 	"blavingad/internal/mail"
 	"blavingad/internal/memory"
 	"blavingad/internal/proxy"
 	"blavingad/internal/scheduler"
 	"blavingad/internal/selfupdate"
-	dcbridge "blavingad/internal/discord"
 	sigbridge "blavingad/internal/signal"
 	"blavingad/internal/slackbot"
 	"blavingad/internal/store"
@@ -110,9 +110,23 @@ func serve() int {
 	client := llm.New(cfg.LLMBaseURL, cfg.LLMAPIKey)
 	client.Headers = cfg.LLMHeaders
 	// API style and base URL can be switched from the dashboard at runtime.
+	var llmProxy *proxy.Proxy // set below; the closures check for nil
+	proxyURL := proxy.LocalURL(cfg.ProxyAddr)
+	viaProxy := func(s agent.Settings) bool {
+		return s.UseProxy && llmProxy != nil && proxyURL != "" && llmProxy.Listening() && llmProxy.HasStyle(s.APIStyle)
+	}
 	client.Endpoint = func() (string, string) {
 		s := agent.LoadSettings(st, cfg)
+		if viaProxy(s) {
+			return s.APIStyle, proxyURL
+		}
 		return s.APIStyle, s.BaseURL
+	}
+	client.KeyFunc = func() string {
+		if viaProxy(agent.LoadSettings(st, cfg)) {
+			return llmProxy.InternalKey()
+		}
+		return ""
 	}
 	embedClient := llm.New(cfg.EmbedBaseURL, cfg.EmbedAPIKey)
 	embedClient.Headers = cfg.LLMHeaders
@@ -185,7 +199,7 @@ func serve() int {
 		post("", "", core.Notice{Title: "Self-improvement review", Task: "Review done", Body: res.Output})
 	}
 
-	llmProxy := proxy.New(st, vc.Resolve, cfg.LLMAPIKey)
+	llmProxy = proxy.New(st, vc.Resolve, cfg.LLMAPIKey)
 	if ls := agent.LoadSettings(st, cfg); true {
 		base := ls.BaseURL
 		if base == "" {
@@ -302,6 +316,7 @@ func serve() int {
 		VaultSync:     vaultSync,
 		Vault:         vc,
 		LLM:           client,
+		Proxy:         llmProxy,
 		RunSchedule:   runSchedule,
 		RunSelfReview: selfReview,
 		ReloadSched:   sched.Reload,

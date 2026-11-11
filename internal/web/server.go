@@ -21,6 +21,7 @@ import (
 	"blavingad/internal/llm"
 	"blavingad/internal/mail"
 	"blavingad/internal/memory"
+	"blavingad/internal/proxy"
 	"blavingad/internal/scheduler"
 	"blavingad/internal/selfupdate"
 	"blavingad/internal/store"
@@ -39,6 +40,7 @@ type Hooks struct {
 	RunSelfReview func()
 	ReloadSched   func()
 	LLM           *llm.Client
+	Proxy         *proxy.Proxy
 }
 
 type Server struct {
@@ -172,6 +174,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/emails", a(s.listEmails))
 	mux.HandleFunc("GET /api/emails/{id}", a(s.getEmail))
 	mux.HandleFunc("POST /api/emails/refresh", a(s.refreshEmails))
+
+	mux.HandleFunc("GET /api/proxy", a(s.getProxy))
+	mux.HandleFunc("POST /api/proxy/upstreams", a(s.saveProxyUpstream))
+	mux.HandleFunc("DELETE /api/proxy/upstreams/{name}", a(s.deleteProxyUpstream))
+	mux.HandleFunc("POST /api/proxy/mappings", a(s.saveProxyMapping))
+	mux.HandleFunc("DELETE /api/proxy/mappings", a(s.deleteProxyMapping))
+	mux.HandleFunc("POST /api/proxy/keys", a(s.createProxyKey))
+	mux.HandleFunc("DELETE /api/proxy/keys/{id}", a(s.deleteProxyKey))
 
 	mux.HandleFunc("GET /api/access", a(s.getAccess))
 	mux.HandleFunc("PUT /api/access/default", a(s.setAccessDefault))

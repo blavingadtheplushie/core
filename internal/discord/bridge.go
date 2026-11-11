@@ -223,7 +223,7 @@ func (b *Bridge) session(ctx context.Context, tok string) error {
 					"status": "online", "afk": false, "since": nil,
 					"activities": []map[string]any{{
 						"type": 4, "name": "Custom Status",
-						"state": "🐙 swimming in the tank · DM me",
+						"state": "🐙 swimming in the tank",
 					}},
 				},
 			}}); err != nil {

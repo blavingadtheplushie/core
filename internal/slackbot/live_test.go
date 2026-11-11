@@ -205,7 +205,7 @@ func TestStreamMarkdown(t *testing.T) {
 
 func TestNativeChunksDelta(t *testing.T) {
 	streamAnswerText = true
-	defer func() { streamAnswerText = false }()
+	defer func() { streamAnswerText = true }()
 	l := newTestLive()
 	l.sent = map[int]string{}
 	l.progress(agent.Progress{Kind: "thinking", Iteration: 1})
@@ -234,7 +234,7 @@ func TestNativeChunksDelta(t *testing.T) {
 // answer: it goes to the plan as a Thinking card instead.
 func TestNativeNarrationGoesToPlan(t *testing.T) {
 	streamAnswerText = true
-	defer func() { streamAnswerText = false }()
+	defer func() { streamAnswerText = true }()
 	l := newTestLive()
 	l.sent = map[int]string{}
 	l.progress(agent.Progress{Kind: "thinking", Iteration: 1})
@@ -257,5 +257,24 @@ func TestNativeNarrationGoesToPlan(t *testing.T) {
 	c = l.nativeChunks()
 	if len(c) != 1 {
 		t.Fatalf("long final answer must stream, got %+v", c)
+	}
+}
+
+func TestNativeFinishModesPrefix(t *testing.T) {
+	l := newTestLive()
+	l.sent = map[int]string{}
+	l.progress(agent.Progress{Kind: "thinking", Iteration: 1})
+	long := strings.Repeat("réponse finale ", 20)
+	l.progress(agent.Progress{Kind: "draft", Text: long})
+	if c := l.nativeChunks(); len(c) != 1 {
+		t.Fatalf("want text chunk, got %+v (streamed %q)", c, l.streamed)
+	}
+	if l.streamed == "" || !strings.HasPrefix(streamMarkdown(long+"fin."), l.streamed) || l.earlierText {
+		t.Fatalf("streamed text should be a prefix of the final answer")
+	}
+	l.progress(agent.Progress{Kind: "thinking", Iteration: 2})
+	l.nativeChunks()
+	if !l.earlierText {
+		t.Fatalf("text of an earlier turn must be tracked")
 	}
 }

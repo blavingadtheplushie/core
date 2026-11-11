@@ -38,15 +38,16 @@ type liveMessage struct {
 	stop      chan struct{}
 
 	// Native Slack streaming (stream.go).
-	user       string // recipient of the stream (the person who asked)
-	native     bool
-	closed     bool
-	nmu        sync.Mutex // serialises stream API calls
-	sent       map[int]string
-	textIter   int
-	streamed   string
-	textBroken bool
-	anyText    bool
+	user        string // recipient of the stream (the person who asked)
+	native      bool
+	closed      bool
+	nmu         sync.Mutex // serialises stream API calls
+	sent        map[int]string
+	textIter    int
+	streamed    string
+	textBroken  bool
+	anyText     bool
+	earlierText bool // text of a previous turn was streamed
 }
 
 type event struct {
@@ -434,8 +435,16 @@ const finalChunkSize = 1200
 func (l *liveMessage) finish(ctx context.Context, res agent.Result) string {
 	close(l.stop)
 	if l.native {
-		// Close the stream, then replace it below with the regular final layout.
-		l.flushNative(ctx, true)
+		switch l.finishNative(ctx, res.Output, res.Status == "done") {
+		case nativeComplete:
+			// The answer is already fully streamed: touching the message
+			// again would duplicate it (Slack keeps streamed text).
+			return l.ts
+		case nativeRepost:
+			if _, _, err := l.b.API.DeleteMessageContext(ctx, l.channel, l.ts); err == nil {
+				l.ts = ""
+			}
+		}
 	}
 	chunks := Chunk(ToMrkdwn(res.Output), finalChunkSize)
 	if len(chunks) == 0 {

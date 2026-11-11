@@ -87,16 +87,18 @@ func (l *liveMessage) nativeChunks() []slack.StreamChunk {
 		chunks = append(chunks, c)
 	}
 	if l.iteration != l.textIter {
+		if l.streamed != "" {
+			l.earlierText = true // that turn's text stays in the message
+		}
 		l.textIter, l.streamed, l.textBroken = l.iteration, "", false
 	}
 	// Text the model writes before a tool call (narration) belongs in the
 	// plan, but appendStream cannot take text back. So a turn's text is only
 	// streamed once it looks like a real answer; narration stays hidden and
 	// shows up as a "Thinking" card when the turn ends with tool calls.
-	// Answer text is no longer streamed: Slack keeps the streamed
-	// markdown_text when the message is later replaced by chat.update, so
-	// the answer showed up twice (partial streamed copy + final blocks).
-	// Only the live plan is streamed; the answer arrives with the final layout.
+	// Slack keeps streamed markdown_text even after chat.update, so once
+	// text is streamed the message is never rewritten: finishNative only
+	// appends what is missing (or deletes and reposts if the text diverged).
 	if !streamAnswerText || (l.streamed == "" && !looksLikeAnswer(l.draft)) {
 		return chunks
 	}
@@ -118,9 +120,8 @@ func (l *liveMessage) nativeChunks() []slack.StreamChunk {
 // the answer: narration next to tool calls is almost always one short line.
 const streamAnswerAfter = 240
 
-// streamAnswerText toggles streaming the answer text itself (off: it was
-// duplicated in the final message).
-var streamAnswerText = false
+// streamAnswerText toggles streaming the answer text itself.
+var streamAnswerText = true
 
 func looksLikeAnswer(draft string) bool {
 	d := strings.TrimSpace(draft)
@@ -198,4 +199,54 @@ func streamMarkdown(s string) string {
 		b.WriteRune(c)
 	}
 	return b.String()
+}
+
+// Outcomes of finishNative.
+const (
+	nativeUpdate   = iota // no text was streamed: replace the message with the final layout
+	nativeComplete        // the streamed text is the whole answer: leave the message alone
+	nativeRepost          // streamed text diverged from the answer: delete and repost
+)
+
+// maxStopText caps the text sent with chat.stopStream; longer remainders
+// take the repost path (the final layout splits long answers).
+const maxStopText = 8000
+
+// finishNative closes the stream append-only: the missing end of the
+// answer goes into chat.stopStream, and the message is never rewritten
+// with the full text (that is what duplicated answers before).
+func (l *liveMessage) finishNative(ctx context.Context, output string, ok bool) int {
+	l.nmu.Lock()
+	defer l.nmu.Unlock()
+	if !l.native || l.closed {
+		return nativeUpdate
+	}
+	chunks := l.nativeChunks()
+	l.mu.Lock()
+	mode := nativeUpdate
+	if l.streamed != "" || l.earlierText {
+		mode = nativeRepost
+		final := streamMarkdown(output)
+		if ok && !l.earlierText && !l.textBroken && strings.HasPrefix(final, l.streamed) {
+			if delta := final[len(l.streamed):]; utf8.RuneCountInString(delta) <= maxStopText {
+				if strings.TrimSpace(delta) != "" {
+					chunks = append(chunks, slack.NewMarkdownTextChunk(delta))
+				}
+				l.streamed, mode = final, nativeComplete
+			}
+		}
+	}
+	l.mu.Unlock()
+	l.closed = true
+	opts := []slack.MsgOption{}
+	if len(chunks) > 0 {
+		opts = append(opts, slack.MsgOptionChunks(chunks...))
+	}
+	if _, _, err := l.b.API.StopStreamContext(ctx, l.channel, l.ts, opts...); err != nil {
+		slog.Warn("native Slack stream stop failed", "err", err, "mode", mode)
+		if mode == nativeComplete {
+			mode = nativeRepost // the end of the answer may be missing
+		}
+	}
+	return mode
 }

@@ -219,6 +219,13 @@ func (b *Bridge) session(ctx context.Context, tok string) error {
 			if err := send(map[string]any{"op": 2, "d": map[string]any{
 				"token": tok, "intents": intents,
 				"properties": map[string]string{"os": "linux", "browser": "blavingad", "device": "blavingad"},
+				"presence": map[string]any{
+					"status": "online", "afk": false, "since": nil,
+					"activities": []map[string]any{{
+						"type": 4, "name": "Custom Status",
+						"state": "🐙 swimming in the tank · DM me",
+					}},
+				},
 			}}); err != nil {
 				return err
 			}

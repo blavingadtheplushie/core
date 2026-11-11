@@ -77,6 +77,7 @@ type Config struct {
 	DeployPortBase int
 
 	WebAddr           string
+	ProxyAddr         string // LLM proxy listener ("off" disables)
 	PublicURL         string
 	SessionSecret     string
 	OIDCIssuer        string
@@ -144,6 +145,7 @@ func Load() *Config {
 		DeployPortBase: envInt("DEPLOY_PORT_BASE", 9100),
 
 		WebAddr:           env("WEB_ADDR", ":8080"),
+		ProxyAddr:         env("PROXY_ADDR", ":8090"),
 		PublicURL:         strings.TrimRight(env("PUBLIC_URL", "http://localhost:8080"), "/"),
 		SessionSecret:     env("SESSION_SECRET", ""),
 		OIDCIssuer:        env("OIDC_ISSUER", ""),

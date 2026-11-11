@@ -337,4 +337,57 @@ UPDATE access_profiles SET tools = '["cat:web","-http_request"]'
 UPDATE access_profiles SET label = 'Blocked', description = 'Ignored: the agent does not reply (their messages are still read).'
   WHERE name = 'blocked' AND label = 'Bloqué';
 `,
+	// 5 — LLM proxy: upstreams with fallback, model aliases, client API keys
+	// (sha256 only) and per-attempt usage.
+	`
+CREATE TABLE llm_upstreams (
+  name TEXT PRIMARY KEY,
+  style TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  key_ref TEXT NOT NULL DEFAULT '',
+  headers TEXT NOT NULL DEFAULT '{}',
+  models TEXT NOT NULL DEFAULT '[]',
+  priority INTEGER NOT NULL DEFAULT 100,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE llm_model_map (
+  alias TEXT NOT NULL,
+  upstream TEXT NOT NULL,
+  model TEXT NOT NULL,
+  PRIMARY KEY (alias, upstream)
+);
+
+CREATE TABLE llm_keys (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  prefix TEXT NOT NULL,
+  hash TEXT NOT NULL UNIQUE,
+  models TEXT NOT NULL DEFAULT '[]',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  last_used_at TEXT,
+  requests INTEGER NOT NULL DEFAULT 0,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE llm_usage (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts TEXT NOT NULL,
+  key_id TEXT NOT NULL,
+  upstream TEXT NOT NULL,
+  model TEXT NOT NULL,
+  status INTEGER NOT NULL,
+  stream INTEGER NOT NULL DEFAULT 0,
+  latency_ms INTEGER NOT NULL DEFAULT 0,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  error TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX llm_usage_ts ON llm_usage(ts);
+`,
 }

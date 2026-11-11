@@ -24,6 +24,7 @@ import (
 	"blavingad/internal/llm"
 	"blavingad/internal/mail"
 	"blavingad/internal/memory"
+	"blavingad/internal/proxy"
 	"blavingad/internal/scheduler"
 	"blavingad/internal/selfupdate"
 	dcbridge "blavingad/internal/discord"
@@ -184,7 +185,15 @@ func serve() int {
 		post("", "", core.Notice{Title: "Self-improvement review", Task: "Review done", Body: res.Output})
 	}
 
-	deps := &tools.Deps{Cfg: cfg, St: st, Mem: mem, LLM: client, Reg: reg, Bus: bus, Mail: ml, Self: self, Sched: sched, Access: access, Vault: vc}
+	llmProxy := proxy.New(st, vc.Resolve, cfg.LLMAPIKey)
+	if ls := agent.LoadSettings(st, cfg); true {
+		base := ls.BaseURL
+		if base == "" {
+			base = cfg.LLMBaseURL
+		}
+		llmProxy.Seed("main", ls.APIStyle, base)
+	}
+	deps := &tools.Deps{Cfg: cfg, St: st, Mem: mem, LLM: client, Reg: reg, Bus: bus, Mail: ml, Self: self, Sched: sched, Access: access, Vault: vc, Proxy: llmProxy}
 	if bot != nil {
 		deps.Slack = bot.API
 		deps.Reveal = bot.RevealSecret
@@ -299,6 +308,7 @@ func serve() int {
 	})
 	webErr := make(chan error, 1)
 	go func() { webErr <- srv.ListenAndServe(ctx) }()
+	go llmProxy.ListenAndServe(ctx, cfg.ProxyAddr)
 
 	if bot != nil {
 		if err := bot.Start(ctx); err != nil {

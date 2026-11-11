@@ -19,6 +19,7 @@ import (
 	"blavingad/internal/llm"
 	"blavingad/internal/mail"
 	"blavingad/internal/memory"
+	"blavingad/internal/proxy"
 	"blavingad/internal/selfupdate"
 	"blavingad/internal/store"
 	"blavingad/internal/vault"
@@ -39,6 +40,7 @@ type Deps struct {
 	Sched  Rescheduler
 	Access *core.Access
 	Vault  *vault.Client
+	Proxy  *proxy.Proxy
 	// Reveal shows a secret to the human behind a run (Slack ephemeral).
 	Reveal func(rc *core.RunContext, ref, value string) error
 	// Ask shows a Slack form (button → modal) to the human behind a run and
@@ -68,6 +70,7 @@ func RegisterAll(d *Deps) {
 	registerSignalLinks(d)
 	registerDiscord(d)
 	registerAsk(d)
+	registerProxy(d)
 	LoadCustomTools(d)
 }
 

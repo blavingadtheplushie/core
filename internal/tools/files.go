@@ -181,7 +181,10 @@ func registerFiles(d *Deps) {
 		}, "path", "content"),
 		Summarize: summarizeField("Writing ", "path", 70),
 		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
-			a, _ := core.Parse[struct{ Path, Content string }](args)
+			a, perr := core.Parse[struct{ Path, Content string }](args)
+			if perr != nil || strings.TrimSpace(a.Path) == "" {
+				return "", fmt.Errorf("fs_write got no usable path (arguments were probably truncated: %d bytes received). Don't retry the same call: split the file into smaller parts (fs_write a first chunk, then append via shell heredoc) or write it with a shell heredoc", len(args))
+			}
 			p, err := d.resolvePath(a.Path)
 			if err != nil {
 				return "", err

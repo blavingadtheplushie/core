@@ -19,15 +19,29 @@ var httpClient = &http.Client{Timeout: 60 * time.Second}
 
 func (d *Deps) exa(ctx context.Context, path string, body any) (map[string]any, error) {
 	payload, _ := json.Marshal(body)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.exa.ai"+path, bytes.NewReader(payload))
-	req.Header.Set("x-api-key", d.Cfg.ExaAPIKey)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
+	var resp *http.Response
+	var data []byte
+	for attempt := 0; ; attempt++ {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.exa.ai"+path, bytes.NewReader(payload))
+		req.Header.Set("x-api-key", d.Cfg.ExaAPIKey)
+		req.Header.Set("Content-Type", "application/json")
+		r, err := httpClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		data, _ = io.ReadAll(io.LimitReader(r.Body, 8<<20))
+		r.Body.Close()
+		resp = r
+		// Exa allows ~10 req/s per team: parallel searches can hit 429, so back off and retry.
+		if r.StatusCode != http.StatusTooManyRequests || attempt >= 3 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(1200*(attempt+1)) * time.Millisecond):
+		}
 	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("Exa HTTP %d: %s", resp.StatusCode, short(string(data), 300))
 	}

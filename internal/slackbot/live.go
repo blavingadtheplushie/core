@@ -155,6 +155,11 @@ func (l *liveMessage) start(ctx context.Context) {
 	if _, ts, err := l.b.send(ctx, l.channel, "", func(plan bool) []slack.Block { return l.workingBlocks(plan) }, opts...); err == nil {
 		l.ts = ts
 	}
+	l.classicTicker()
+}
+
+// classicTicker re-renders the live message (chat.update) when it changed.
+func (l *liveMessage) classicTicker() {
 	go func() {
 		t := time.NewTicker(1200 * time.Millisecond)
 		defer t.Stop()

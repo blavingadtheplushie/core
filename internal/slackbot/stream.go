@@ -150,6 +150,12 @@ func (l *liveMessage) flushNative(ctx context.Context, last bool, extra ...slack
 	}
 	if err != nil {
 		slog.Warn("native Slack stream update failed", "err", err, "last", last)
+		if !last && strings.Contains(err.Error(), "message_not_in_streaming_state") {
+			// Slack closed the stream (10 min cap, or a long retry pause):
+			// carry on with the classic chat.update live message.
+			l.fallbackClassic(ctx)
+			return
+		}
 		if !last {
 			// Stop appending; finish() still closes the stream and posts the answer.
 			l.mu.Lock()
@@ -249,4 +255,31 @@ func (l *liveMessage) finishNative(ctx context.Context, output string, ok bool) 
 		}
 	}
 	return mode
+}
+
+// fallbackClassic switches a stream Slack has closed to the classic live
+// message. Called with nmu held. Streamed text cannot be removed by
+// chat.update, so in that case the message is replaced by a new one.
+func (l *liveMessage) fallbackClassic(ctx context.Context) {
+	l.closed, l.native = true, false
+	l.mu.Lock()
+	hadText := l.streamed != "" || l.earlierText
+	l.dirty = true
+	l.mu.Unlock()
+	slog.Info("native Slack stream closed by Slack, falling back to the classic live message", "had_text", hadText)
+	if hadText && l.ts != "" {
+		if _, _, err := l.b.API.DeleteMessageContext(ctx, l.channel, l.ts); err == nil {
+			l.ts = ""
+		}
+	}
+	if l.ts == "" {
+		opts := []slack.MsgOption{slack.MsgOptionText("Working on it…", false)}
+		if l.thread != "" {
+			opts = append(opts, slack.MsgOptionTS(l.thread))
+		}
+		if _, ts, err := l.b.send(ctx, l.channel, "", func(plan bool) []slack.Block { return l.workingBlocks(plan) }, opts...); err == nil {
+			l.ts = ts
+		}
+	}
+	l.classicTicker()
 }

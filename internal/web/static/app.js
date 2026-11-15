@@ -1428,6 +1428,7 @@ async function renderSettings() {
           <div class="span-2 hint" id="model-hint">Looking up the models this endpoint offers…</div>
           <div class="field"><label class="label" for="set-temp">Temperature</label><input class="input" id="set-temp" name="temperature" type="number" min="0" max="2" step="0.05" value="${esc(s.temperature)}"></div>
           <div class="field"><label class="label" for="set-iter">Max steps per request</label><input class="input" id="set-iter" name="max_iterations" type="number" min="1" max="100" value="${esc(s.max_iterations)}"></div>
+          <div class="field"><label class="label" for="set-retries">LLM retries in a row <span class="hint-inline">errors, replies cut by max tokens · 0 = off</span></label><input class="input" id="set-retries" name="llm_retries" type="number" min="0" max="20" value="${esc(s.llm_retries)}"></div>
           <div class="field span-2"><label class="label" for="set-extra">Extra instructions <span class="hint-inline">added to its prompt</span></label><textarea class="textarea" id="set-extra" name="extra_prompt" placeholder="e.g. Always answer in under 5 lines in #general.">${esc(s.extra_prompt)}</textarea></div>
         </div></div></section>
         <section class="card"><div class="card-head"><div><h3>⚙️ Behavior</h3><p>What it does on its own.</p></div></div><div class="card-body">
@@ -1474,7 +1475,7 @@ async function renderSettings() {
 async function saveSettings(form, quiet = false) {
   const fd = new FormData(form);
   const body = {};
-  for (const key of ['api_style', 'base_url', 'model', 'fast_model', 'temperature', 'max_iterations', 'extra_prompt', 'self_review_cron', 'email_profile', 'home_channel', 'bot_reply_limit']) body[key] = String(fd.get(key) ?? '').trim();
+  for (const key of ['api_style', 'base_url', 'model', 'fast_model', 'temperature', 'max_iterations', 'llm_retries', 'extra_prompt', 'self_review_cron', 'email_profile', 'home_channel', 'bot_reply_limit']) body[key] = String(fd.get(key) ?? '').trim();
   for (const key of ['reflection', 'follow_threads', 'use_proxy', 'stream_replies', 'channel_digest', 'email_auto', 'self_review']) body[key] = form.querySelector(`[name="${key}"]`).checked;
   try {
     await api('/settings', { method: 'PATCH', body });

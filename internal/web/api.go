@@ -821,6 +821,12 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 				writeErr(w, 400, "iterations must be between 1 and 100")
 				return
 			}
+		case "llm_retries":
+			n, err := strconv.Atoi(val)
+			if err != nil || n < 0 || n > 20 {
+				writeErr(w, 400, "llm retries must be between 0 and 20")
+				return
+			}
 		case "bot_reply_limit":
 			n, err := strconv.Atoi(val)
 			if err != nil || n < 0 || n > 200 {

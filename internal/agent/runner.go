@@ -301,6 +301,9 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 	}
 	temp := s.Temperature
 	narration := "" // last text the model wrote next to tool calls
+	retries := 0    // consecutive failed / truncated model calls
+	partial := ""   // answer text already written before a max-tokens cut
+	boost := 0      // bigger output budget after a cut
 	for iter := 1; iter <= maxIter; iter++ {
 		if ctx.Err() != nil {
 			runErr = ctx.Err()
@@ -310,7 +313,7 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 		msgs = r.compact(ctx, res.RunID, msgs, s)
 		progress(Progress{Kind: "thinking", Iteration: iter})
 		start := time.Now()
-		creq := llm.Request{Model: s.Model, Messages: msgs, Tools: defs, Temperature: &temp, MaxTokens: r.cfg.LLMMaxTokens}
+		creq := llm.Request{Model: s.Model, Messages: msgs, Tools: defs, Temperature: &temp, MaxTokens: max(r.cfg.LLMMaxTokens, boost)}
 		if s.StreamReplies && req.Depth == 0 && req.OnProgress != nil {
 			creq.OnText = draftStreamer(func(text string) { req.OnProgress(Progress{Kind: "draft", Text: text, Iteration: iter}) })
 		}
@@ -320,11 +323,40 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 		}
 		if err != nil {
 			r.step(res.RunID, "llm", s.Model, "", err.Error(), "error", time.Since(start), 0)
+			if ctx.Err() == nil && retries < s.LLMRetries {
+				retries++
+				progress(Progress{Kind: "note", Label: fmt.Sprintf("model error, retrying (%d/%d)", retries, s.LLMRetries)})
+				if sleepCtx(ctx, time.Duration(retries)*5*time.Second) {
+					iter--
+					continue
+				}
+			}
 			runErr = err
 			return
 		}
 		res.Usage.PromptTokens += resp.Usage.PromptTokens
 		res.Usage.CompletionTokens += resp.Usage.CompletionTokens
+		if cut := resp.FinishReason == "length" || resp.FinishReason == "max_tokens"; cut && retries < s.LLMRetries &&
+			(len(resp.Message.ToolCalls) > 0 || strings.TrimSpace(resp.Message.Content) != "") {
+			// The reply was cut by the output token limit: keep what was
+			// written, drop half-written tool calls, and ask it to go on.
+			retries++
+			boost = min(max(r.cfg.LLMMaxTokens, 4096)*2, 64000)
+			text := core.Secrets.Redact(resp.Message.Content)
+			r.step(res.RunID, "llm", s.Model+" (cut off)", "", fmt.Sprintf("finish_reason=%s · resuming (%d/%d)\n\n%s", resp.FinishReason, retries, s.LLMRetries, text), "error", time.Since(start), resp.Usage.PromptTokens+resp.Usage.CompletionTokens)
+			progress(Progress{Kind: "note", Label: fmt.Sprintf("reply cut by max tokens, resuming (%d/%d)", retries, s.LLMRetries)})
+			nudge := "[System] Your reply was cut off by the output token limit. Continue exactly where you stopped, without repeating what you already wrote."
+			if len(resp.Message.ToolCalls) > 0 {
+				nudge = "[System] Your reply was cut off by the output token limit while writing a tool call, so the call was dropped and NOT executed. Redo it with smaller arguments (split big files or texts into several steps)."
+			} else {
+				partial += text
+			}
+			msgs = append(msgs, llm.Message{Role: "assistant", Content: firstNonEmpty(strings.TrimSpace(text), "…")},
+				llm.Message{Role: "user", Content: nudge})
+			iter--
+			continue
+		}
+		retries = 0
 		var names []string
 		for _, tc := range resp.Message.ToolCalls {
 			names = append(names, tc.Function.Name)
@@ -344,12 +376,13 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 			narration = resp.Message.Content
 		}
 		if len(resp.Message.ToolCalls) == 0 {
-			res.Output = strings.TrimSpace(resp.Message.Content)
+			res.Output = strings.TrimSpace(partial + resp.Message.Content)
 			if res.Output == "" {
 				res.Output = r.recoverEmpty(ctx, res.RunID, s, msgs[:len(msgs)-1], resp, narration, &res.Usage)
 			}
 			break
 		}
+		partial, boost = "", 0
 		results := r.execTools(ctx, rc, resp.Message.ToolCalls, progress, iter)
 		res.ToolCalls += len(results)
 		for i, tc := range resp.Message.ToolCalls {
@@ -711,5 +744,17 @@ func draftStreamer(emit func(string)) func(string) {
 			last = shown
 			emit(shown)
 		}
+	}
+}
+
+// sleepCtx waits d, or returns false early if ctx is cancelled.
+func sleepCtx(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
 	}
 }

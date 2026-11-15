@@ -34,9 +34,12 @@ type Settings struct {
 	// UseProxy routes the agent's own LLM calls through its LLM proxy
 	// (multi-upstream fallback) instead of calling the endpoint directly.
 	UseProxy bool `json:"use_proxy"`
+	// LLMRetries is how many times in a row a model call is retried (or a
+	// reply cut off by the token limit is resumed) before the run gives up.
+	LLMRetries int `json:"llm_retries"`
 }
 
-var SettingKeys = []string{"api_style", "base_url", "model", "fast_model", "temperature", "max_iterations", "reflection", "self_review", "self_review_cron", "follow_threads", "email_auto", "email_profile", "home_channel", "channel_digest", "extra_prompt", "bot_reply_limit", "stream_replies", "use_proxy"}
+var SettingKeys = []string{"api_style", "base_url", "model", "fast_model", "temperature", "max_iterations", "reflection", "self_review", "self_review_cron", "follow_threads", "email_auto", "email_profile", "home_channel", "channel_digest", "extra_prompt", "bot_reply_limit", "stream_replies", "use_proxy", "llm_retries"}
 
 func LoadSettings(st *store.Store, cfg *config.Config) Settings {
 	get := func(k, def string) string { return st.GetSetting("agent."+k, def) }
@@ -55,6 +58,10 @@ func LoadSettings(st *store.Store, cfg *config.Config) Settings {
 	botLimit, err := strconv.Atoi(get("bot_reply_limit", ""))
 	if err != nil || botLimit < 0 {
 		botLimit = 10
+	}
+	retries, err := strconv.Atoi(get("llm_retries", ""))
+	if err != nil || retries < 0 {
+		retries = 3
 	}
 	return Settings{
 		APIStyle:       get("api_style", cfg.LLMStyle),
@@ -75,5 +82,6 @@ func LoadSettings(st *store.Store, cfg *config.Config) Settings {
 		BotReplyLimit:  botLimit,
 		StreamReplies:  b("stream_replies", false),
 		UseProxy:       b("use_proxy", false),
+		LLMRetries:     retries,
 	}
 }

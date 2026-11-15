@@ -35,6 +35,25 @@ type Runner struct {
 	mu     sync.Mutex
 	active map[string]*activeRun
 	wg     sync.WaitGroup
+
+	// interrupted lists the runs a restart cut off (filled at startup).
+	interrupted []InterruptedRun
+}
+
+// InterruptedRun is a run that was still going when the process restarted.
+type InterruptedRun struct {
+	ID, Source, Channel, ThreadTS, MessageTS, UserID, Input string
+	StartedAt                                               time.Time
+	Tools                                                   []string // tools it already ran
+}
+
+// Interrupted returns (once) the runs cut off by the last restart.
+func (r *Runner) Interrupted() []InterruptedRun {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := r.interrupted
+	r.interrupted = nil
+	return out
 }
 
 type activeRun struct {
@@ -108,7 +127,26 @@ type Result struct {
 
 func NewRunner(cfg *config.Config, st *store.Store, mem *memory.Service, client *llm.Client, reg *core.Registry, bus *core.Bus, ap *core.Approvals, access *core.Access) *Runner {
 	r := &Runner{cfg: cfg, st: st, mem: mem, llm: client, reg: reg, bus: bus, approvals: ap, access: access, active: map[string]*activeRun{}}
-	// Runs interrupted by a restart can never finish.
+	// Runs interrupted by a restart can never finish here; remember them so
+	// the front-ends can relaunch the recent ones.
+	if rows, err := st.Rows(`SELECT id, source, COALESCE(channel,'') AS channel, COALESCE(thread_ts,'') AS thread_ts, COALESCE(message_ts,'') AS message_ts, COALESCE(user_id,'') AS user_id, input, started_at FROM runs WHERE status = 'running' AND parent_id IS NULL`); err == nil {
+		for _, row := range rows {
+			ir := InterruptedRun{ID: fmt.Sprint(row["id"]), Source: fmt.Sprint(row["source"]), Channel: fmt.Sprint(row["channel"]), ThreadTS: fmt.Sprint(row["thread_ts"]),
+				MessageTS: fmt.Sprint(row["message_ts"]), UserID: fmt.Sprint(row["user_id"]), Input: fmt.Sprint(row["input"])}
+			ir.StartedAt, _ = time.Parse(time.RFC3339Nano, fmt.Sprint(row["started_at"]))
+			if tr, err := st.Rows(`SELECT name FROM run_steps WHERE run_id = ? AND kind = 'tool' ORDER BY id`, ir.ID); err == nil {
+				for _, t := range tr {
+					ir.Tools = append(ir.Tools, fmt.Sprint(t["name"]))
+				}
+			}
+			if slices.Contains(ir.Tools, "self_upgrade") || slices.Contains(ir.Tools, "self_rollback") {
+				// The restart was the run's own last step: it already replied.
+				st.DB.Exec(`UPDATE runs SET status = 'done', finished_at = ? WHERE id = ?`, store.Now(), ir.ID)
+				continue
+			}
+			r.interrupted = append(r.interrupted, ir)
+		}
+	}
 	st.DB.Exec(`UPDATE runs SET status = 'interrupted', finished_at = ? WHERE status = 'running'`, store.Now())
 	r.registerDelegate()
 	return r
@@ -336,8 +374,7 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 		}
 		res.Usage.PromptTokens += resp.Usage.PromptTokens
 		res.Usage.CompletionTokens += resp.Usage.CompletionTokens
-		if cut := resp.FinishReason == "length" || resp.FinishReason == "max_tokens"; cut && retries < s.LLMRetries &&
-			(len(resp.Message.ToolCalls) > 0 || strings.TrimSpace(resp.Message.Content) != "") {
+		if cut := resp.FinishReason == "length" || resp.FinishReason == "max_tokens"; cut && retries < s.LLMRetries {
 			// The reply was cut by the output token limit: keep what was
 			// written, drop half-written tool calls, and ask it to go on.
 			retries++
@@ -346,13 +383,17 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 			r.step(res.RunID, "llm", s.Model+" (cut off)", "", fmt.Sprintf("finish_reason=%s · resuming (%d/%d)\n\n%s", resp.FinishReason, retries, s.LLMRetries, text), "error", time.Since(start), resp.Usage.PromptTokens+resp.Usage.CompletionTokens)
 			progress(Progress{Kind: "note", Label: fmt.Sprintf("reply cut by max tokens, resuming (%d/%d)", retries, s.LLMRetries)})
 			nudge := "[System] Your reply was cut off by the output token limit. Continue exactly where you stopped, without repeating what you already wrote."
-			if len(resp.Message.ToolCalls) > 0 {
+			if len(resp.Message.ToolCalls) == 0 && strings.TrimSpace(text) == "" {
+				nudge = "[System] Your whole output budget went into thinking and nothing was written. Think less: take the next concrete step now (a tool call, or your answer). Split big work into several smaller steps."
+			} else if len(resp.Message.ToolCalls) > 0 {
 				nudge = "[System] Your reply was cut off by the output token limit while writing a tool call, so the call was dropped and NOT executed. Redo it with smaller arguments (split big files or texts into several steps)."
 			} else {
 				partial += text
 			}
-			msgs = append(msgs, llm.Message{Role: "assistant", Content: firstNonEmpty(strings.TrimSpace(text), "…")},
-				llm.Message{Role: "user", Content: nudge})
+			if strings.TrimSpace(text) != "" || len(resp.Message.ToolCalls) > 0 {
+				msgs = append(msgs, llm.Message{Role: "assistant", Content: firstNonEmpty(strings.TrimSpace(text), "…")})
+			}
+			msgs = append(msgs, llm.Message{Role: "user", Content: nudge})
 			iter--
 			continue
 		}

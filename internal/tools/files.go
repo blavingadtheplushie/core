@@ -193,6 +193,7 @@ func registerFiles(d *Deps) {
 			if err := os.WriteFile(p, []byte(a.Content), 0o644); err != nil {
 				return "", err
 			}
+			d.hackatimeBeat(p, strings.Count(a.Content, "\n")+1)
 			return fmt.Sprintf("Wrote %s (%d bytes).", p, len(a.Content)), nil
 		},
 	})
@@ -238,6 +239,7 @@ func registerFiles(d *Deps) {
 			if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
 				return "", err
 			}
+			d.hackatimeBeat(p, strings.Count(s, "\n")+1)
 			return fmt.Sprintf("%s edited (%d replacement(s)).", p, map[bool]int{true: n, false: 1}[a.ReplaceAll]), nil
 		},
 	})

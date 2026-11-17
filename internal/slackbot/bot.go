@@ -592,7 +592,7 @@ func (b *Bot) Announce(channel, thread string, n core.Notice) {
 		return
 	}
 	if _, err := b.Post(context.Background(), channel, thread, n); err != nil {
-		slog.Warn("announce failed", "err", err)
+		slog.Warn("announce failed", "err", err, "channel", channel, "title", n.Title)
 	}
 }
 

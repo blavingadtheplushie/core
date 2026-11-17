@@ -85,8 +85,22 @@ func (r *Runner) reflect(runID string, rc *core.RunContext, msgs []llm.Message) 
 		} `json:"person_notes"`
 	}
 	if err := json.Unmarshal([]byte(extractJSON(resp.Message.Content)), &out); err != nil {
-		slog.Warn("reflection parse failed", "err", err)
-		return
+		// Usually an empty reply: the fast model spent its whole budget
+		// thinking (finish=length). Retry once with more room.
+		slog.Warn("reflection parse failed, retrying", "err", err, "finish", resp.FinishReason, "len", len(resp.Message.Content))
+		resp2, err2 := r.llm.Chat(ctx, llm.Request{Model: s.FastModel, JSONMode: true, Temperature: llm.F(0.1), MaxTokens: 6000, Messages: []llm.Message{
+			{Role: "system", Content: fmt.Sprintf(reflectPrompt, r.cfg.AgentName) + "\nThink briefly. Output the JSON object only."},
+			{Role: "user", Content: "Already known:\n" + kb.String() + "\n\nExchange:\n" + transcript},
+		}})
+		if err2 != nil {
+			slog.Warn("reflection retry failed", "err", err2)
+			return
+		}
+		if err := json.Unmarshal([]byte(extractJSON(resp2.Message.Content)), &out); err != nil {
+			slog.Warn("reflection parse failed", "err", err, "finish", resp2.FinishReason, "len", len(resp2.Message.Content))
+			return
+		}
+		resp = resp2
 	}
 	saved := 0
 	var lines []string

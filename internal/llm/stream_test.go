@@ -89,3 +89,12 @@ func TestAnthropicStreamFallbackJSON(t *testing.T) {
 		t.Fatalf("err=%v content=%q got=%q", err, resp.Message.Content, got)
 	}
 }
+
+func TestPermanent429(t *testing.T) {
+	if !permanent429([]byte(`{"error":{"type":"rate_limit_error","message":"You don't have any usage yet. DM @kavyansh. on Slack to request access."}}`)) {
+		t.Fatal("expected permanent")
+	}
+	if permanent429([]byte(`{"error":{"type":"rate_limit_error","message":"Too many requests"}}`)) {
+		t.Fatal("expected transient")
+	}
+}

@@ -383,7 +383,7 @@ func (c *Client) post(ctx context.Context, url, style string, body any, out any)
 		}
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 		resp.Body.Close()
-		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
+		if (resp.StatusCode == 429 && !permanent429(data)) || resp.StatusCode >= 500 {
 			lastErr = fmt.Errorf("LLM HTTP %d: %s", resp.StatusCode, truncate(string(data), 400))
 			continue
 		}
@@ -479,4 +479,16 @@ func openAIMessages(msgs []Message) []Message {
 	}
 	flush()
 	return out
+}
+
+// permanent429 reports a 429 that retrying won't fix (no access, quota/credits
+// exhausted), so we fail fast instead of backing off for minutes.
+func permanent429(body []byte) bool {
+	b := strings.ToLower(string(body))
+	for _, k := range []string{"don't have any usage", "insufficient_quota", "exceeded your current quota", "request access", "out of credits", "billing"} {
+		if strings.Contains(b, k) {
+			return true
+		}
+	}
+	return false
 }

@@ -51,7 +51,7 @@ func (c *Client) streamAnthropic(ctx context.Context, url string, body any, out 
 			data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
 			lastErr = fmt.Errorf("LLM HTTP %d: %s", resp.StatusCode, truncate(string(data), 800))
-			if resp.StatusCode == 429 || resp.StatusCode >= 500 {
+			if (resp.StatusCode == 429 && !permanent429(data)) || resp.StatusCode >= 500 {
 				continue
 			}
 			return data, lastErr

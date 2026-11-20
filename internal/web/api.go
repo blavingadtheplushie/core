@@ -221,7 +221,7 @@ func (s *Server) getRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 404, "run not found")
 		return
 	}
-	steps, _ := s.st.Rows(`SELECT id, kind, name, input, output, status, duration_ms, tokens, created_at FROM run_steps WHERE run_id = ? ORDER BY id`, id)
+	steps, _ := s.st.Rows(`SELECT id, kind, name, input, output, status, duration_ms, tokens, COALESCE(usage,'') AS usage, created_at FROM run_steps WHERE run_id = ? ORDER BY id`, id)
 	children, _ := s.st.Rows(`SELECT id, substr(input,1,200) AS input, status, tool_calls, started_at, finished_at FROM runs WHERE parent_id = ? ORDER BY started_at`, id)
 	approvals, _ := s.st.Rows(`SELECT id, tool, summary, status, decided_by, created_at, decided_at FROM approvals WHERE run_id = ? ORDER BY created_at`, id)
 	// Resolve recalled memory ids into content for the trace view.

@@ -127,7 +127,7 @@ func (r *Runner) reflect(runID string, rc *core.RunContext, msgs []llm.Message) 
 		}
 	}
 	if len(lines) > 0 {
-		r.step(runID, "reflect", "reflection", "", strings.Join(lines, "\n"), "ok", time.Since(start), resp.Usage.PromptTokens+resp.Usage.CompletionTokens)
+		r.stepUsage(runID, "reflect", "reflection", "", strings.Join(lines, "\n"), "ok", time.Since(start), resp.Usage.PromptTokens+resp.Usage.CompletionTokens, usageDetail(resp.Usage))
 		r.bus.Publish("memory.updated", map[string]any{"run_id": runID, "count": saved})
 	}
 	reflected = lines

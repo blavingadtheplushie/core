@@ -841,7 +841,47 @@ const STEP_META = {
   compact: ['history', 'llm', 'Context compaction'],
   access: ['shield', 'memory', 'Access profile'],
   thought: ['spark', 'memory', 'Thinking'],
+  context: ['history', 'memory', 'Prompt size'],
 };
+
+function parseUsage(step) {
+  if (!step.usage) return null;
+  try { return JSON.parse(step.usage); } catch { return null; }
+}
+
+// One model call: uncached input · cache read · cache write · output.
+function usageLine(u) {
+  if (!u) return '';
+  const bits = [['in', u.input], ['cache read', u.cache_read], ['cache write', u.cache_write], ['out', u.output]].filter(([, v]) => v);
+  return bits.length ? `<div class="tiny muted">${bits.map(([k, v]) => `${esc(k)} <strong>${fmtNum(v)}</strong>`).join(' · ')}</div>` : '';
+}
+
+function barList(rows, total) {
+  return `<div class="bar-list">${rows.map((r) => `<div class="bar-row"><div class="bar-meta"><span>${esc(r.name)}</span><span>~${fmtNum(r.tokens)} tok${total ? ` · ${Math.round((r.tokens / total) * 100)}%` : ''}</span></div><div class="bar-track"><div class="bar-fill" style="width:${total ? Math.max(1, (r.tokens / total) * 100) : 0}%"></div></div></div>`).join('')}</div>`;
+}
+
+// Where the tokens of a run went: per-call input/cache/output, prompt sections, tool results.
+function tokenBreakdown(run, steps) {
+  const llm = steps.filter((s) => s.kind === 'llm' || s.kind === 'reflect').map((s) => ({ s, u: parseUsage(s) })).filter((x) => x.u);
+  const ctx = steps.find((s) => s.kind === 'context');
+  const cu = ctx ? parseUsage(ctx) : null;
+  const toolRes = steps.filter((s) => s.kind === 'tool').map((s) => ({ name: s.name, tokens: (parseUsage(s) || {}).result_est || 0 })).filter((t) => t.tokens);
+  if (!llm.length && !cu && !toolRes.length) return '';
+  const sum = (k) => llm.reduce((a, x) => a + (x.u[k] || 0), 0);
+  const totals = { input: sum('input'), cache_read: sum('cache_read'), cache_write: sum('cache_write'), output: sum('output') };
+  const all = totals.input + totals.cache_read + totals.cache_write + totals.output;
+  const callRows = llm.map((x, i) => `<tr><td class="num">${i + 1}</td><td class="small">${esc(x.s.kind === 'reflect' ? 'reflection' : (x.s.input ? `→ ${truncate(x.s.input, 40)}` : x.s.name))}</td><td class="num">${fmtNum(x.u.input || 0)}</td><td class="num">${fmtNum(x.u.cache_read || 0)}</td><td class="num">${fmtNum(x.u.cache_write || 0)}</td><td class="num">${fmtNum(x.u.output || 0)}</td></tr>`).join('');
+  const toolAgg = {};
+  toolRes.forEach((t) => { toolAgg[t.name] = (toolAgg[t.name] || 0) + t.tokens; });
+  const toolRows = Object.entries(toolAgg).map(([name, tokens]) => ({ name, tokens })).sort((a, b) => b.tokens - a.tokens).slice(0, 10);
+  const toolTotal = toolRows.reduce((a, r) => a + r.tokens, 0);
+  return `<section class="card"><div class="card-head"><div><h3>🪙 Tokens</h3><p>${fmtCompact(all)} total · ${all ? Math.round((totals.cache_read / all) * 100) : 0}% read from cache</p></div></div><div class="card-body">
+    ${llm.length ? `<div class="io-label">Model calls (real usage)</div><div class="table-wrap"><table class="data"><thead><tr><th>#</th><th>Call</th><th>In</th><th>Cache read</th><th>Cache write</th><th>Out</th></tr></thead><tbody>${callRows}<tr><td></td><td class="small"><strong>Total</strong></td><td class="num"><strong>${fmtNum(totals.input)}</strong></td><td class="num"><strong>${fmtNum(totals.cache_read)}</strong></td><td class="num"><strong>${fmtNum(totals.cache_write)}</strong></td><td class="num"><strong>${fmtNum(totals.output)}</strong></td></tr></tbody></table></div>` : ''}
+    ${cu ? `<div class="io-label" style="margin-top:14px">Prompt per call (estimate, ~${fmtNum(cu.total)} tok)</div>${barList([...(cu.sections || [])].sort((a, b) => b.tokens - a.tokens), cu.total)}
+      ${(cu.tools || []).length ? `<details class="tl-details" style="margin-top:10px"><summary>Heaviest tool schemas</summary>${barList(cu.tools.slice(0, 15), cu.sections.find((x) => x.name.startsWith('tool schemas'))?.tokens || 0)}</details>` : ''}` : ''}
+    ${toolRows.length ? `<div class="io-label" style="margin-top:14px">Tool results added to the context (estimate, resent on every later call)</div>${barList(toolRows, toolTotal)}` : ''}
+  </div></section>`;
+}
 
 function stepItem(step, toolsByName) {
   const [ico, cls, title] = STEP_META[step.kind] || ['spark', '', step.kind];
@@ -854,7 +894,7 @@ function stepItem(step, toolsByName) {
   let detail = '';
   if (step.kind === 'llm') {
     label = `<span>${esc(title)}</span> <code class="muted">${esc(step.name)}</code>`;
-    text = step.input ? `→ calls ${esc(step.input)}` : (step.status === 'error' ? `<span style="color:var(--blk)">${esc(truncate(step.output, 300))}</span>` : 'Final answer');
+    text = (step.input ? `→ calls ${esc(step.input)}` : (step.status === 'error' ? `<span style="color:var(--blk)">${esc(truncate(step.output, 300))}</span>` : 'Final answer')) + usageLine(parseUsage(step));
     if (step.output && step.status !== 'error') detail = `<div class="io-label">Model text</div><div class="pre sm">${esc(step.output)}</div>`;
   } else if (step.kind === 'tool') {
     label = `<code>${esc(step.name)}</code>${step.status === 'error' ? badge('error', 'bad') : step.status === 'denied' ? badge('denied', 'bad') : ''}`;
@@ -867,6 +907,10 @@ function stepItem(step, toolsByName) {
     label = esc(title);
     text = `<em>${esc(truncate(step.output, 400))}</em>`;
     if (String(step.output || '').length > 400) detail = `<div class="pre sm">${esc(step.output)}</div>`;
+  } else if (step.kind === 'context') {
+    const cu = parseUsage(step) || {};
+    label = esc(title);
+    text = `~${fmtNum(cu.total || 0)} tokens sent with every model call: ${esc((cu.sections || []).filter((x) => x.tokens).sort((a, b) => b.tokens - a.tokens).slice(0, 3).map((x) => `${x.name} ${fmtCompact(x.tokens)}`).join(', '))}`;
   } else if (step.kind === 'access') {
     label = `${esc(title)} · ${esc(step.input)}`;
     text = `Restricted conversation: ${esc(step.output)}`;
@@ -876,7 +920,8 @@ function stepItem(step, toolsByName) {
     text = step.kind === 'recall' ? `${lines.length} memor${lines.length === 1 ? 'y' : 'ies'} injected into the prompt` : step.kind === 'compact' ? esc(step.input) : `${lines.length} item${lines.length === 1 ? '' : 's'} retained`;
     if (step.output) detail = `<div class="pre sm">${esc(step.output)}</div>`;
   }
-  const meta = [step.duration_ms ? fmtMs(step.duration_ms) : '', step.tokens ? `${fmtCompact(step.tokens)} tok` : '', fmtTime(step.created_at)].filter(Boolean).join(' · ');
+  const resEst = step.kind === 'tool' ? (parseUsage(step) || {}).result_est : 0;
+  const meta = [step.duration_ms ? fmtMs(step.duration_ms) : '', step.tokens ? `${fmtCompact(step.tokens)} tok` : '', resEst ? `~${fmtCompact(resEst)} tok result` : '', fmtTime(step.created_at)].filter(Boolean).join(' · ');
   return `<div class="tl-item"><div class="tl-dot ${statusCls}">${dot}</div><div class="tl-body"><div class="tl-title">${label}<span class="tl-time">${esc(meta)}</span></div>${text ? `<div class="tl-text">${text}</div>` : ''}${detail ? `<details class="tl-details"><summary>Details</summary>${detail}</details>` : ''}</div></div>`;
 }
 
@@ -913,7 +958,7 @@ async function renderRun(id, silent = false) {
           <div class="metric"><strong>${esc(duration(run.started_at, run.finished_at))}</strong><span>Duration</span></div>
           <div class="metric"><strong>${fmtNum(llmCalls)}</strong><span>Model calls</span></div>
           <div class="metric"><strong>${fmtNum(tools.length)}</strong><span>Tools</span></div>
-          <div class="metric"><strong>${fmtCompact(tokens)}</strong><span>Tokens</span></div>
+          <div class="metric"><strong>${fmtCompact(tokens)}</strong><span>Tokens${run.cache_read_tokens ? ` · ${fmtCompact(run.cache_read_tokens)} cached` : ''}</span></div>
           <div class="metric"><strong style="font-size:15px">${esc(run.model || '—')}</strong><span>Model</span></div>
         </div>
       </div>
@@ -922,6 +967,7 @@ async function renderRun(id, silent = false) {
       <section class="card"><div class="card-head"><div><h3>Harness trace</h3><p>${fmtNum(data.steps.length)} step${data.steps.length === 1 ? '' : 's'}${run.status === 'running' ? ' · live' : ''}</p></div>${run.status === 'running' ? '<span class="live-dot run"></span>' : ''}</div>
         <div class="timeline">${data.steps.length ? data.steps.map((s) => stepItem(s, toolsByName)).join('') : '<div class="hint">No steps recorded.</div>'}</div></section>
       <div class="stack" style="align-content:start">
+        ${tokenBreakdown(run, data.steps)}
         <section class="card"><div class="card-head"><div><h3>Answer</h3><p>${run.status === 'running' ? 'Writing…' : 'What the agent replied.'}</p></div>${run.output ? `<button class="icon-btn" data-action="copy-text" data-text="${esc(run.output)}" aria-label="Copy" title="Copy">${icon('copy')}</button>` : ''}</div>
           <div class="card-body">${run.output ? `<div class="md">${md(run.output)}</div>` : '<div class="hint">—</div>'}${run.error ? `<div class="auth-error" style="margin:12px 0 0">${esc(run.error)}</div>` : ''}</div></section>
         ${data.children.length ? `<section class="card"><div class="card-head"><div><h3>🧑‍🚀 Sub-agents</h3><p>Tasks delegated in parallel.</p></div></div><div class="card-body">${data.children.map((c) => `<a class="top-link-row" href="#/runs/${esc(c.id)}" style="text-decoration:none;color:inherit"><div class="top-link-main"><strong>${esc(c.input)}</strong><span>${fmtNum(c.tool_calls)} tools · ${esc(duration(c.started_at, c.finished_at))}</span></div>${runStatus(c.status)}</a>`).join('')}</div></section>` : ''}

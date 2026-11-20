@@ -390,4 +390,11 @@ CREATE TABLE llm_usage (
 );
 CREATE INDEX llm_usage_ts ON llm_usage(ts);
 `,
+	// 6 — token accounting: per-step usage detail (JSON: input, cache
+	// read/write, output) and run-level cache totals.
+	`
+ALTER TABLE run_steps ADD COLUMN usage TEXT;
+ALTER TABLE runs ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE runs ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0;
+`,
 }

@@ -194,9 +194,22 @@ func (r *Runner) CancelThread(channel, thread string) int {
 }
 
 func (r *Runner) step(runID, kind, name, input, output, status string, dur time.Duration, tokens int) {
+	r.stepUsage(runID, kind, name, input, output, status, dur, tokens, nil)
+}
+
+// stepUsage records a step with a token detail (JSON in run_steps.usage):
+// for model calls the input/cache/output split, for the "context" step the
+// size of each prompt section.
+func (r *Runner) stepUsage(runID, kind, name, input, output, status string, dur time.Duration, tokens int, usage any) {
 	input, output = core.Secrets.Redact(input), core.Secrets.Redact(output)
-	r.st.DB.Exec(`INSERT INTO run_steps(run_id, kind, name, input, output, status, duration_ms, tokens, created_at) VALUES(?,?,?,?,?,?,?,?,?)`,
-		runID, kind, name, input, output, status, dur.Milliseconds(), tokens, store.Now())
+	var u any
+	if usage != nil {
+		if b, err := json.Marshal(usage); err == nil {
+			u = string(b)
+		}
+	}
+	r.st.DB.Exec(`INSERT INTO run_steps(run_id, kind, name, input, output, status, duration_ms, tokens, created_at, usage) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+		runID, kind, name, input, output, status, dur.Milliseconds(), tokens, store.Now(), u)
 	r.bus.Publish("run.step", map[string]any{"run_id": runID, "kind": kind, "name": name, "status": status, "duration_ms": dur.Milliseconds()})
 }
 
@@ -265,8 +278,8 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 		}
 		res.Status = status
 		res.Output = core.Secrets.Redact(res.Output)
-		r.st.DB.Exec(`UPDATE runs SET output = ?, status = ?, error = ?, tool_calls = ?, prompt_tokens = ?, completion_tokens = ?, finished_at = ? WHERE id = ?`,
-			res.Output, status, nullable(errText), res.ToolCalls, res.Usage.PromptTokens, res.Usage.CompletionTokens, store.Now(), res.RunID)
+		r.st.DB.Exec(`UPDATE runs SET output = ?, status = ?, error = ?, tool_calls = ?, prompt_tokens = ?, completion_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?, finished_at = ? WHERE id = ?`,
+			res.Output, status, nullable(errText), res.ToolCalls, res.Usage.PromptTokens, res.Usage.CompletionTokens, res.Usage.CacheReadTokens, res.Usage.CacheWriteTokens, store.Now(), res.RunID)
 		r.bus.Publish("run.finished", map[string]any{"id": res.RunID, "status": status, "output": short(res.Output, 300), "tool_calls": res.ToolCalls})
 	}()
 
@@ -279,7 +292,12 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 	if len(req.History) > 0 {
 		query = lastUserText(req.History) + "\n" + req.Text
 	}
-	sys, mems := r.systemPrompt(ctx, rc, query, req.Extra, s)
+	sysParts, mems := r.systemParts(ctx, rc, query, req.Extra, s)
+	sysTexts := make([]string, len(sysParts))
+	for i, p := range sysParts {
+		sysTexts[i] = p.Text
+	}
+	sys := strings.Join(sysTexts, "\n\n")
 	res.Memories, res.Model = len(mems), s.Model
 	if len(mems) > 0 {
 		ids := make([]string, len(mems))
@@ -326,6 +344,7 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 		}
 	}
 	defs := r.reg.Definitions(rc.Allowed, nil)
+	r.recordContext(res.RunID, sysParts, defs, req)
 	if !prof.IsAdmin() {
 		r.step(res.RunID, "access", prof.Name, prof.Emoji+" "+prof.Label, fmt.Sprintf("%d tools allowed · memory %s", len(defs), prof.Memory), "ok", 0, 0)
 	}
@@ -372,15 +391,14 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 			runErr = err
 			return
 		}
-		res.Usage.PromptTokens += resp.Usage.PromptTokens
-		res.Usage.CompletionTokens += resp.Usage.CompletionTokens
+		addUsage(&res.Usage, resp.Usage)
 		if cut := resp.FinishReason == "length" || resp.FinishReason == "max_tokens"; cut && retries < s.LLMRetries {
 			// The reply was cut by the output token limit: keep what was
 			// written, drop half-written tool calls, and ask it to go on.
 			retries++
 			boost = min(max(r.cfg.LLMMaxTokens, 4096)*2, 64000)
 			text := core.Secrets.Redact(resp.Message.Content)
-			r.step(res.RunID, "llm", s.Model+" (cut off)", "", fmt.Sprintf("finish_reason=%s · resuming (%d/%d)\n\n%s", resp.FinishReason, retries, s.LLMRetries, text), "error", time.Since(start), resp.Usage.PromptTokens+resp.Usage.CompletionTokens)
+			r.stepUsage(res.RunID, "llm", s.Model+" (cut off)", "", fmt.Sprintf("finish_reason=%s · resuming (%d/%d)\n\n%s", resp.FinishReason, retries, s.LLMRetries, text), "error", time.Since(start), resp.Usage.PromptTokens+resp.Usage.CompletionTokens, usageDetail(resp.Usage))
 			progress(Progress{Kind: "note", Label: fmt.Sprintf("reply cut by max tokens, resuming (%d/%d)", retries, s.LLMRetries)})
 			nudge := "[System] Your reply was cut off by the output token limit. Continue exactly where you stopped, without repeating what you already wrote."
 			if len(resp.Message.ToolCalls) == 0 && strings.TrimSpace(text) == "" {
@@ -402,7 +420,7 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 		for _, tc := range resp.Message.ToolCalls {
 			names = append(names, tc.Function.Name)
 		}
-		r.step(res.RunID, "llm", s.Model, strings.Join(names, ", "), resp.Message.Content, "ok", time.Since(start), resp.Usage.PromptTokens+resp.Usage.CompletionTokens)
+		r.stepUsage(res.RunID, "llm", s.Model, strings.Join(names, ", "), resp.Message.Content, "ok", time.Since(start), resp.Usage.PromptTokens+resp.Usage.CompletionTokens, usageDetail(resp.Usage))
 		resp.Message.Content = core.Secrets.Redact(resp.Message.Content)
 		msgs = append(msgs, resp.Message)
 		// Surface the model's thinking: native reasoning when the provider
@@ -438,8 +456,8 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 				runErr = err
 				return
 			}
-			res.Usage.PromptTokens += resp.Usage.PromptTokens
-			res.Usage.CompletionTokens += resp.Usage.CompletionTokens
+			addUsage(&res.Usage, resp.Usage)
+			r.stepUsage(res.RunID, "llm", s.Model+" (step limit)", "", resp.Message.Content, "ok", 0, resp.Usage.PromptTokens+resp.Usage.CompletionTokens, usageDetail(resp.Usage))
 			res.Output = strings.TrimSpace(core.Secrets.Redact(resp.Message.Content))
 			if res.Output == "" {
 				res.Output = r.recoverEmpty(ctx, res.RunID, s, msgs, resp, narration, &res.Usage)
@@ -478,10 +496,9 @@ func (r *Runner) recoverEmpty(ctx context.Context, runID string, s Settings, his
 	start := time.Now()
 	resp, err := r.llm.Chat(ctx, llm.Request{Model: s.Model, Messages: msgs, Temperature: &temp, MaxTokens: maxTokens})
 	if err == nil {
-		usage.PromptTokens += resp.Usage.PromptTokens
-		usage.CompletionTokens += resp.Usage.CompletionTokens
+		addUsage(usage, resp.Usage)
 		out := core.Secrets.Redact(strings.TrimSpace(resp.Message.Content))
-		r.step(runID, "llm", s.Model+" (retry)", "", out, map[bool]string{true: "ok", false: "error"}[out != ""], time.Since(start), resp.Usage.PromptTokens+resp.Usage.CompletionTokens)
+		r.stepUsage(runID, "llm", s.Model+" (retry)", "", out, map[bool]string{true: "ok", false: "error"}[out != ""], time.Since(start), resp.Usage.PromptTokens+resp.Usage.CompletionTokens, usageDetail(resp.Usage))
 		if out != "" {
 			return out
 		}
@@ -558,7 +575,8 @@ func (r *Runner) execTool(ctx context.Context, rc *core.RunContext, tc llm.ToolC
 		}
 		// Whatever a tool printed, known secrets never reach the model.
 		out = core.Secrets.Redact(out)
-		r.step(rc.RunID, "tool", name, string(args), out, status, time.Since(start), 0)
+		// The result is resent on every later model call: show its weight.
+		r.stepUsage(rc.RunID, "tool", name, string(args), out, status, time.Since(start), 0, map[string]int{"result_est": estTokens(out), "args_est": estTokens(string(args))})
 		progress(Progress{Kind: "tool_end", Tool: name, Emoji: t.Emoji, Label: label, Category: t.Category, OK: status == "ok", Text: clip(out, 1500), DurationMs: time.Since(start).Milliseconds(), Iteration: iter})
 	}()
 

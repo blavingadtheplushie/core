@@ -144,10 +144,17 @@ func (r *Runner) skillsIndex() string {
 	return b.String()
 }
 
-func (r *Runner) recall(ctx context.Context, rc *core.RunContext, query string) (string, []memory.Memory) {
+func (r *Runner) recall(ctx context.Context, rc *core.RunContext, query string) ([]promptPart, []memory.Memory) {
 	var b strings.Builder
+	var parts []promptPart
+	flush := func(name string) {
+		if b.Len() > 0 {
+			parts = append(parts, promptPart{name, strings.TrimRight(b.String(), "\n")})
+			b.Reset()
+		}
+	}
 	if rc.Profile != nil && rc.Profile.Memory == "none" {
-		return "", nil
+		return nil, nil
 	}
 	if rc.UserID != "" {
 		if p, ok := r.mem.GetPerson(rc.UserID); ok {
@@ -164,11 +171,13 @@ func (r *Runner) recall(ctx context.Context, rc *core.RunContext, query string) 
 			b.WriteString("\n")
 		}
 	}
+	flush("person notes")
 	if rc.Channel != "" {
 		if d := r.mem.ChannelDigest(rc.Channel); d != "" {
 			fmt.Fprintf(&b, "## Summary of this channel\n%s\n\n", d)
 		}
 	}
+	flush("channel summary")
 	mems := r.mem.Search(ctx, query, "", 10)
 	if len(mems) > 0 {
 		b.WriteString("## Relevant memories\n")
@@ -176,7 +185,8 @@ func (r *Runner) recall(ctx context.Context, rc *core.RunContext, query string) 
 			fmt.Fprintf(&b, "- #%d [%s%s] %s\n", m.ID, m.Kind, subjectSuffix(m.Subject), m.Content)
 		}
 	}
-	return b.String(), mems
+	flush("memories")
+	return parts, mems
 }
 
 func subjectSuffix(s string) string {
@@ -186,18 +196,34 @@ func subjectSuffix(s string) string {
 	return " · " + s
 }
 
+// promptPart is one named section of the system prompt, kept so the run
+// trace can show where the input tokens go.
+type promptPart struct {
+	Name string
+	Text string
+}
+
 func (r *Runner) systemPrompt(ctx context.Context, rc *core.RunContext, query string, extra string, s Settings) (string, []memory.Memory) {
+	parts, mems := r.systemParts(ctx, rc, query, extra, s)
+	texts := make([]string, len(parts))
+	for i, p := range parts {
+		texts[i] = p.Text
+	}
+	return strings.Join(texts, "\n\n"), mems
+}
+
+func (r *Runner) systemParts(ctx context.Context, rc *core.RunContext, query string, extra string, s Settings) ([]promptPart, []memory.Memory) {
 	rules := strings.NewReplacer("{{LANG}}", r.cfg.Language, "{{SRC}}", r.cfg.SourceDir).Replace(operatingRules)
 	recall, mems := r.recall(ctx, rc, query)
-	parts := []string{core.CurrentPersona(r.st, r.cfg.AgentName), rules, r.environment(rc)}
+	parts := []promptPart{{"persona", core.CurrentPersona(r.st, r.cfg.AgentName)}, {"rules", rules}, {"environment", r.environment(rc)}}
 	if sk := r.skillsIndex(); sk != "" {
-		parts = append(parts, sk)
+		parts = append(parts, promptPart{"skills index", sk})
 	}
-	if recall != "" {
-		parts = append(parts, recall)
+	for _, rp := range recall {
+		parts = append(parts, rp)
 	}
 	if strings.TrimSpace(s.ExtraPrompt) != "" {
-		parts = append(parts, "## Admin instructions\n"+s.ExtraPrompt)
+		parts = append(parts, promptPart{"admin instructions", "## Admin instructions\n" + s.ExtraPrompt})
 	}
 	if p := rc.Profile; p != nil && !p.IsAdmin() {
 		mem := map[string]string{
@@ -209,12 +235,12 @@ func (r *Runner) systemPrompt(ctx context.Context, rc *core.RunContext, query st
 		if strings.TrimSpace(p.ExtraPrompt) != "" {
 			section += "\n\n" + p.ExtraPrompt
 		}
-		parts = append(parts, section)
+		parts = append(parts, promptPart{"access profile", section})
 	}
 	if extra != "" {
-		parts = append(parts, extra)
+		parts = append(parts, promptPart{"extra (request)", extra})
 	}
-	return strings.Join(parts, "\n\n"), mems
+	return parts, mems
 }
 
 func firstNonEmpty(v ...string) string {

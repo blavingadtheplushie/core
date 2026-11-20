@@ -62,13 +62,15 @@ func (r *Runner) reflect(runID string, rc *core.RunContext, msgs []llm.Message) 
 		kb.WriteString("- " + m.Content + "\n")
 	}
 	s := r.Settings()
-	resp, err := r.llm.Chat(ctx, llm.Request{Model: s.FastModel, JSONMode: true, Temperature: llm.F(0.1), MaxTokens: 1500, Messages: []llm.Message{
-		{Role: "system", Content: fmt.Sprintf(reflectPrompt, r.cfg.AgentName)},
+	// 1500 tokens was always eaten by thinking (13/13 first tries cut at
+	// max_tokens on 2026-11-19), so start with the room the retry needed.
+	resp, err := r.llm.Chat(ctx, llm.Request{Model: s.FastModel, JSONMode: true, Temperature: llm.F(0.1), MaxTokens: 6000, Messages: []llm.Message{
+		{Role: "system", Content: fmt.Sprintf(reflectPrompt, r.cfg.AgentName) + "\nThink briefly. Output the JSON object only."},
 		{Role: "user", Content: "Already known:\n" + kb.String() + "\n\nExchange:\n" + transcript},
 	}})
 	if err != nil {
 		// Some servers reject response_format; retry once without it.
-		resp, err = r.llm.Chat(ctx, llm.Request{Model: s.FastModel, Temperature: llm.F(0.1), MaxTokens: 1500, Messages: []llm.Message{
+		resp, err = r.llm.Chat(ctx, llm.Request{Model: s.FastModel, Temperature: llm.F(0.1), MaxTokens: 6000, Messages: []llm.Message{
 			{Role: "system", Content: fmt.Sprintf(reflectPrompt, r.cfg.AgentName)},
 			{Role: "user", Content: "Already known:\n" + kb.String() + "\n\nExchange:\n" + transcript},
 		}})

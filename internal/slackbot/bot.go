@@ -377,9 +377,17 @@ func (b *Bot) downloadFiles(ctx context.Context, ts string, files []slack.File) 
 func (b *Bot) history(ctx context.Context, ev *slackevents.MessageEvent) []llm.Message {
 	var msgs []slack.Message
 	if ev.ThreadTimeStamp != "" {
-		replies, _, _, err := b.API.GetConversationRepliesContext(ctx, &slack.GetConversationRepliesParameters{ChannelID: ev.Channel, Timestamp: ev.ThreadTimeStamp, Limit: 60})
-		if err == nil {
-			msgs = replies
+		cursor := ""
+		for page := 0; page < 10; page++ {
+			replies, more, next, err := b.API.GetConversationRepliesContext(ctx, &slack.GetConversationRepliesParameters{ChannelID: ev.Channel, Timestamp: ev.ThreadTimeStamp, Limit: 200, Cursor: cursor})
+			if err != nil {
+				break
+			}
+			msgs = append(msgs, replies...)
+			if !more || next == "" {
+				break
+			}
+			cursor = next
 		}
 	} else if ev.ChannelType == "im" {
 		res, err := b.API.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{ChannelID: ev.Channel, Limit: 16, Latest: ev.TimeStamp})
@@ -399,17 +407,13 @@ func (b *Bot) history(ctx context.Context, ev *slackevents.MessageEvent) []llm.M
 			continue
 		}
 		if m.User == b.BotUserID || (m.BotID != "" && m.BotID == b.BotID) {
-			if strings.HasPrefix(m.Text, "🤖 Working on it") || strings.HasPrefix(m.Text, "Working on it") {
-				continue
-			}
-			// The visible answer lives in blocks; the text field is only a
-			// truncated fallback, so prefer the full output of the run.
-			content := m.Text
 			var full string
-			if b.st.DB.QueryRow(`SELECT COALESCE(output,'') FROM runs WHERE channel = ? AND reply_ts = ?`, ev.Channel, m.Timestamp).Scan(&full) == nil && full != "" {
-				content = full
+			if b.st.DB.QueryRow(`SELECT COALESCE(output,'') FROM runs WHERE channel = ? AND reply_ts = ?`, ev.Channel, m.Timestamp).Scan(&full) != nil {
+				full = ""
 			}
-			out = append(out, llm.Message{Role: "assistant", Content: content})
+			if content := botHistoryText(m.Text, full); content != "" {
+				out = append(out, llm.Message{Role: "assistant", Content: content})
+			}
 			continue
 		}
 		who := b.userName(ctx, m.User)
@@ -419,6 +423,25 @@ func (b *Bot) history(ctx context.Context, ev *slackevents.MessageEvent) []llm.M
 		out = out[len(out)-40:]
 	}
 	return out
+}
+
+// botHistoryText returns what one of the bot's own messages contributes to the
+// history: the full run output when known, otherwise the text fallback minus
+// the "Working on it…" prefix. A bare placeholder yields "".
+func botHistoryText(text, runOutput string) string {
+	if strings.TrimSpace(runOutput) != "" {
+		return runOutput
+	}
+	t := strings.TrimSpace(text)
+	for _, p := range []string{"🤖 Working on it…", "Working on it…", "🤖 Working on it...", "Working on it..."} {
+		t = strings.TrimSpace(strings.TrimPrefix(t, p))
+	}
+	if strings.HasPrefix(t, "(step ") {
+		if i := strings.Index(t, ")"); i >= 0 {
+			t = strings.TrimSpace(t[i+1:])
+		}
+	}
+	return t
 }
 
 func (b *Bot) recentChannel(ctx context.Context, channel, before string) string {

@@ -20,6 +20,7 @@ import (
 	"blavingad/internal/core"
 	"blavingad/internal/llm"
 	"blavingad/internal/store"
+	"blavingad/internal/textutil"
 	"blavingad/internal/tools"
 )
 
@@ -255,7 +256,7 @@ type user struct {
 	Bot        bool   `json:"bot"`
 }
 
-func (u user) display() string { return firstNonEmpty(u.GlobalName, u.Username, u.ID) }
+func (u user) display() string { return textutil.FirstNonEmpty(u.GlobalName, u.Username, u.ID) }
 
 func (b *Bridge) dispatch(ctx context.Context, t string, d json.RawMessage) {
 	switch t {
@@ -295,7 +296,7 @@ func (b *Bridge) dispatch(ctx context.Context, t string, d json.RawMessage) {
 		}
 		text := strings.TrimSpace(m.Content)
 		if rm := m.ReferencedMessage; rm != nil && rm.Content != "" {
-			text = fmt.Sprintf("[replying to: %q]\n%s", short(rm.Content, 300), text)
+			text = fmt.Sprintf("[replying to: %q]\n%s", textutil.Short(rm.Content, 300), text)
 		}
 		for _, a := range m.Attachments {
 			text += fmt.Sprintf("\n[attachment: %s %s — not downloaded]", a.ContentType, a.Filename)
@@ -400,7 +401,7 @@ func (b *Bridge) handleInteraction(ctx context.Context, d json.RawMessage) {
 		Data struct {
 			Name     string `json:"name"`
 			CustomID string `json:"custom_id"`
-			Options []struct {
+			Options  []struct {
 				Name  string `json:"name"`
 				Value any    `json:"value"`
 			} `json:"options"`
@@ -440,7 +441,7 @@ func (b *Bridge) handleInteraction(ctx context.Context, d json.RawMessage) {
 		return
 	}
 	where := map[int]string{0: "a server channel", 1: "your own DM with the user", 2: "a private chat/DM of the user with someone else"}[in.Context]
-	where = "/ask slash command used in " + firstNonEmpty(where, "Discord") + "; your answer is visible to the people there"
+	where = "/ask slash command used in " + textutil.FirstNonEmpty(where, "Discord") + "; your answer is visible to the people there"
 	res := b.Runner.Run(ctx, agent.Request{
 		Source: "discord", Channel: "discord:i:" + in.ChannelID, ChannelName: "/ask",
 		MessageTS: in.ID, UserID: slackID, UserName: u.display(),
@@ -451,7 +452,7 @@ func (b *Bridge) handleInteraction(ctx context.Context, d json.RawMessage) {
 	if out == "" {
 		out = "(no answer, sorry — something went wrong on my side)"
 	}
-	parts := tools.SplitDiscord("> "+short(prompt, 300)+"\n"+out, 0)
+	parts := tools.SplitDiscord("> "+textutil.Short(prompt, 300)+"\n"+out, 0)
 	hook := "/webhooks/" + in.ApplicationID + "/" + in.Token
 	if _, err := tools.DiscordDo(ctx, "PATCH", hook+"/messages/@original", map[string]any{"content": parts[0], "allowed_mentions": map[string]any{"parse": []string{}}}); err != nil {
 		slog.Error("discord: interaction reply failed", "err", err)
@@ -491,21 +492,4 @@ func recoverLog() {
 	if p := recover(); p != nil {
 		slog.Error("discord: handler panic", "err", p)
 	}
-}
-
-func firstNonEmpty(v ...string) string {
-	for _, s := range v {
-		if strings.TrimSpace(s) != "" {
-			return s
-		}
-	}
-	return ""
-}
-
-func short(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n]) + "…"
 }

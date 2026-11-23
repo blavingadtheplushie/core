@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"blavingad/internal/core"
+	"blavingad/internal/textutil"
 )
 
 // Discord: a bot application that people install as a *user app*
@@ -275,7 +276,7 @@ func registerDiscord(d *Deps) {
 		}, "text"),
 		Summarize: func(args json.RawMessage) string {
 			a, _ := core.Parse[struct{ User, Channel, Text string }](args)
-			return fmt.Sprintf("Discord → %s: %s", firstNonEmpty(a.User, "#"+a.Channel), Clip(a.Text, 200))
+			return fmt.Sprintf("Discord → %s: %s", textutil.FirstNonEmpty(a.User, "#"+a.Channel), Clip(a.Text, 200))
 		},
 		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
 			a, _ := core.Parse[struct{ User, Channel, Text string }](args)

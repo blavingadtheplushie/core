@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"blavingad/internal/core"
+	"blavingad/internal/textutil"
 	"blavingad/internal/vault"
 )
 
@@ -155,7 +156,7 @@ func registerVault(d *Deps) {
 			"reason":    core.Str("Why this person needs it."),
 		}, "reference", "reason"),
 		Summarize: func(args json.RawMessage) string {
-			return "Reveal " + field(args, "reference") + " to the person (" + short(field(args, "reason"), 50) + ")"
+			return "Reveal " + field(args, "reference") + " to the person (" + textutil.Short(field(args, "reason"), 50) + ")"
 		},
 		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
 			if err := d.vaultAllowed(rc); err != nil {

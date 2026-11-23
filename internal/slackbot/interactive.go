@@ -9,6 +9,7 @@ import (
 	"github.com/slack-go/slack"
 
 	"blavingad/internal/core"
+	"blavingad/internal/textutil"
 )
 
 // NotifyApproval implements core.ApprovalNotifier with a Block Kit card.
@@ -192,7 +193,7 @@ func (b *Bot) publishHome(ctx context.Context, user string) {
 		if i := strings.Index(in, "): "); i > 0 && i < 100 {
 			in = in[i+3:]
 		}
-		lines = append(lines, icon+" "+escape(short(in, 90)))
+		lines = append(lines, icon+" "+escape(textutil.Short(in, 90)))
 	}
 	recentText := "_Nothing yet — say hi!_"
 	if len(lines) > 0 {
@@ -240,7 +241,7 @@ func (b *Bot) RevealSecret(rc *core.RunContext, ref, value string) error {
 			contextLine(note),
 		}
 	}
-	thread := firstNonEmpty(rc.ThreadTS, rc.MessageTS)
+	thread := textutil.FirstNonEmpty(rc.ThreadTS, rc.MessageTS)
 	if strings.HasPrefix(rc.Channel, "D") {
 		thread = ""
 	}

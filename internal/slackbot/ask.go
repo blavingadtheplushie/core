@@ -11,6 +11,7 @@ import (
 	"github.com/slack-go/slack"
 
 	"blavingad/internal/core"
+	"blavingad/internal/textutil"
 )
 
 // AskRequest is a question the agent asks a human through a Slack form
@@ -47,7 +48,7 @@ func (b *Bot) Ask(ctx context.Context, rc *core.RunContext, req AskRequest) (str
 	if req.Timeout <= 0 {
 		req.Timeout = 15 * time.Minute
 	}
-	channel, thread := rc.Channel, firstNonEmpty(rc.ThreadTS, rc.MessageTS)
+	channel, thread := rc.Channel, textutil.FirstNonEmpty(rc.ThreadTS, rc.MessageTS)
 	if channel == "" || strings.HasPrefix(channel, "web") || strings.HasPrefix(channel, "signal:") || strings.HasPrefix(channel, "discord:") {
 		channel, thread = rc.UserID, "" // DM the person
 	}
@@ -129,9 +130,9 @@ func (b *Bot) openAsk(ctx context.Context, cb slack.InteractionCallback, act *sl
 		return
 	}
 	in := slack.NewPlainTextInputBlockElement(plain("…"), "value")
-	input := slack.NewInputBlock("v", plain(clipRunes(p.req.Label, 150)), nil, in)
+	input := slack.NewInputBlock("v", plain(textutil.Clip(p.req.Label, 150)), nil, in)
 	if p.req.Hint != "" {
-		input.Hint = plain(clipRunes(p.req.Hint, 150))
+		input.Hint = plain(textutil.Clip(p.req.Hint, 150))
 	}
 	blocks := []slack.Block{input}
 	if p.req.Secret {

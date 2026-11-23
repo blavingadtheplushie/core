@@ -94,15 +94,15 @@ func (d *Deps) hackatimeBeat(p string, lines int) {
 			return
 		}
 		hb := map[string]any{
-			"entity":   p,
-			"type":     "file",
-			"category": "ai coding",
-			"time":     float64(time.Now().UnixNano()) / 1e9,
-			"project":  filepath.Base(root),
-			"is_write": true,
-			"editor":   "blavingad",
-			"plugin":   "blavingad/1.0",
-			"machine":  "blavingad-lxc",
+			"entity":           p,
+			"type":             "file",
+			"category":         "ai coding",
+			"time":             float64(time.Now().UnixNano()) / 1e9,
+			"project":          filepath.Base(root),
+			"is_write":         true,
+			"editor":           "blavingad",
+			"plugin":           "blavingad/1.0",
+			"machine":          "blavingad-lxc",
 			"operating_system": "Linux",
 		}
 		if lang := hackatimeLanguage(p); lang != "" {

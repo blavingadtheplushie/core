@@ -14,6 +14,7 @@ import (
 	"blavingad/internal/cloudflare"
 	"blavingad/internal/core"
 	"blavingad/internal/store"
+	"blavingad/internal/textutil"
 )
 
 var (
@@ -54,7 +55,7 @@ func registerDeploy(d *Deps) {
 			"project": core.Str("Pages project name (lowercase, dashes)."),
 		}, "path", "project"),
 		Summarize: func(args json.RawMessage) string {
-			return "Cloudflare Pages: " + field(args, "project") + " ← " + short(field(args, "path"), 50)
+			return "Cloudflare Pages: " + field(args, "project") + " ← " + textutil.Short(field(args, "path"), 50)
 		},
 		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
 			a, _ := core.Parse[struct{ Path, Project string }](args)
@@ -102,7 +103,7 @@ func registerDeploy(d *Deps) {
 			}
 			res := d.sh(ctx, dir, cmd, 10*time.Minute)
 			url := reWorkersURL.FindString(res.Output)
-			name := firstNonEmpty(slugify(a.Name), dir)
+			name := textutil.FirstNonEmpty(slugify(a.Name), dir)
 			if res.ExitCode != 0 {
 				d.recordDeploy(rc, "cloudflare_worker", name, url, "failed", map[string]string{"path": dir})
 				return "", fmt.Errorf("deployment failed:\n%s", Clip(res.Output, 4000))
@@ -269,7 +270,7 @@ func registerDeploy(d *Deps) {
 			if status, _, _ := d.gh(ctx, "GET", "/repos/"+user+"/"+repo, nil); status == 404 {
 				st, data, err := d.gh(ctx, "POST", "/user/repos", map[string]any{"name": repo, "private": false, "description": "Published by " + d.Cfg.AgentName})
 				if err != nil || st >= 400 {
-					return "", fmt.Errorf("could not create the repo: %s", short(string(data), 300))
+					return "", fmt.Errorf("could not create the repo: %s", textutil.Short(string(data), 300))
 				}
 			}
 			tmp, _ := os.MkdirTemp("", "ghpages-")

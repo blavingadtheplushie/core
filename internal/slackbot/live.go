@@ -6,22 +6,20 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/slack-go/slack"
 
 	"blavingad/internal/agent"
+	"blavingad/internal/textutil"
 )
 
-// liveMessage is the Block Kit reply that streams the harness while it works
-// and then turns into the final answer.
+// liveMessage is one reply. Two paths only:
 //
-// Everything the agent did — recalled memories, each thinking step, each
-// tool call with its arguments and result, and the post-run reflection — is
-// kept as a chronological timeline and rendered as a native Slack `plan`
-// block (task cards, collapsible) at the top of the message, so the answer
-// comes first visually and the details stay out of the way. Workspaces that
-// reject plan blocks get a compact classic layout instead.
+//   - native stream (stream.go): chat.startStream, tool calls stream as
+//     task cards and the answer text streams as it is written;
+//   - fallback, when Slack refuses or loses the stream: nothing is edited
+//     live, the final answer is posted (or the stream message replaced)
+//     once at the end, with the timeline as a collapsed `plan` block on top.
 type liveMessage struct {
 	b       *Bot
 	channel string
@@ -32,9 +30,7 @@ type liveMessage struct {
 	mu        sync.Mutex
 	events    []*event
 	iteration int
-	version   int
-	dirty     bool
-	draft     string // reply streamed so far (stream_replies setting)
+	draft     string // reply written so far in the current model turn
 	stop      chan struct{}
 
 	// Native Slack streaming (stream.go).
@@ -51,7 +47,7 @@ type liveMessage struct {
 }
 
 type event struct {
-	kind     string // recall | thought | tool | reflection
+	kind     string // recall | thought | tool
 	key      string
 	tool     string
 	category string
@@ -101,14 +97,6 @@ func escape(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }
 
-func clipRunes(s string, n int) string {
-	s = strings.TrimSpace(s)
-	if r := []rune(s); len(r) > n {
-		return string(r[:n]) + "…"
-	}
-	return s
-}
-
 // rawBlock lets us emit blocks exactly as documented (plan tasks have no
 // "type" field, which slack-go's TaskCardBlock always sets).
 type rawBlock struct {
@@ -144,40 +132,10 @@ func richText(text string, pre bool) map[string]any {
 
 // ---------- progress ----------
 
+// start opens the native stream. If Slack refuses it, nothing is posted
+// until the answer is ready (no live chat.update edits).
 func (l *liveMessage) start(ctx context.Context) {
-	if l.b.runner != nil && l.b.runner.Settings().StreamReplies && l.startNative(ctx) {
-		return
-	}
-	opts := []slack.MsgOption{slack.MsgOptionText("Working on it…", false)}
-	if l.thread != "" {
-		opts = append(opts, slack.MsgOptionTS(l.thread))
-	}
-	if _, ts, err := l.b.send(ctx, l.channel, "", func(plan bool) []slack.Block { return l.workingBlocks(plan) }, opts...); err == nil {
-		l.ts = ts
-	}
-	l.classicTicker()
-}
-
-// classicTicker re-renders the live message (chat.update) when it changed.
-func (l *liveMessage) classicTicker() {
-	go func() {
-		t := time.NewTicker(1200 * time.Millisecond)
-		defer t.Stop()
-		for {
-			select {
-			case <-l.stop:
-				return
-			case <-t.C:
-				l.mu.Lock()
-				dirty := l.dirty
-				l.dirty = false
-				l.mu.Unlock()
-				if dirty && l.ts != "" {
-					l.b.send(context.Background(), l.channel, l.ts, func(plan bool) []slack.Block { return l.workingBlocks(plan) }, slack.MsgOptionText("Working on it…", false))
-				}
-			}
-		}
-	}()
+	l.startNative(ctx)
 }
 
 func (l *liveMessage) progress(p agent.Progress) {
@@ -224,7 +182,6 @@ func (l *liveMessage) progress(p agent.Progress) {
 			}
 		}
 	}
-	l.dirty = true
 }
 
 // ---------- plan rendering ----------
@@ -240,20 +197,20 @@ func (e *event) taskTitle() string {
 	if e.denied {
 		title = "🚫 " + title
 	}
-	return clipRunes(title, 140)
+	return textutil.Clip(title, 140)
 }
 
 func (l *liveMessage) task(i int, e *event) map[string]any {
 	t := map[string]any{"task_id": fmt.Sprintf("t%d", i+1), "title": e.taskTitle(), "status": e.status}
 	if d := strings.TrimSpace(e.details); d != "" {
-		t["details"] = richText(clipRunes(d, 1500), e.kind == "tool")
+		t["details"] = richText(textutil.Clip(d, 1500), e.kind == "tool")
 	}
 	out := strings.TrimSpace(e.output)
 	if e.kind == "tool" && privateOutput[e.category] && !e.denied && out != "" {
 		out = "(result hidden in Slack — see the trace)"
 	}
 	if out != "" {
-		t["output"] = richText(clipRunes(out, 1200), e.kind == "tool" && !e.denied && !strings.HasPrefix(out, "("))
+		t["output"] = richText(textutil.Clip(out, 1200), e.kind == "tool" && !e.denied && !strings.HasPrefix(out, "("))
 	}
 	return t
 }
@@ -270,9 +227,9 @@ func (l *liveMessage) countTools() (tools, thoughts int) {
 	return
 }
 
-// planBlock renders the timeline; extra events (the reflection) go last.
-func (l *liveMessage) planBlock(title string, extra ...*event) slack.Block {
-	events := append(append([]*event{}, l.events...), extra...)
+// planBlock renders the timeline.
+func (l *liveMessage) planBlock(title string) slack.Block {
+	events := l.events
 	var tasks []any
 	if len(events) > 50 {
 		// Plans hold 50 tasks: fold the oldest ones into a single line.
@@ -286,37 +243,7 @@ func (l *liveMessage) planBlock(title string, extra ...*event) slack.Block {
 	if len(tasks) == 0 {
 		tasks = append(tasks, map[string]any{"task_id": "t1", "title": "💭 Thinking…", "status": "in_progress"})
 	}
-	// Stable ID per run: Slack keeps the reflection block open across updates.
 	return rawBlock{kind: "plan", id: fmt.Sprintf("plan-%s", l.runID), body: map[string]any{"title": title, "tasks": tasks}}
-}
-
-func (l *liveMessage) workingBlocks(plan bool) []slack.Block {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if !plan {
-		return l.legacyWorking()
-	}
-	title := "Working on it…"
-	if l.iteration > 1 {
-		title = fmt.Sprintf("Working on it… (step %d)", l.iteration)
-	}
-	return append([]slack.Block{l.planBlock(title)}, l.draftBlocks()...)
-}
-
-// draftBlocks renders the reply streamed so far, with a cursor.
-func (l *liveMessage) draftBlocks() []slack.Block {
-	if strings.TrimSpace(l.draft) == "" {
-		return nil
-	}
-	chunks := Chunk(ToMrkdwn(l.draft)+" ▍", finalChunkSize)
-	if len(chunks) > 40 {
-		chunks = chunks[:40]
-	}
-	var blocks []slack.Block
-	for _, c := range chunks {
-		blocks = append(blocks, section(c))
-	}
-	return blocks
 }
 
 func doneTitle(tools, thoughts int, status string) string {
@@ -339,92 +266,18 @@ func doneTitle(tools, thoughts int, status string) string {
 	return "Thought process · " + strings.Join(parts, " · ")
 }
 
-// reflectionEvent describes the background reflection: nil when none runs.
-func reflectionEvent(reflecting bool, done bool, lines []string) *event {
-	if !reflecting {
-		return nil
-	}
-	e := &event{kind: "reflection", emoji: "💭", title: "Reflection", status: "in_progress", output: "Reflecting on this conversation…"}
-	if done {
-		e.status = "complete"
-		if len(lines) == 0 {
-			e.output = "Nothing new worth remembering."
-		} else {
-			var b strings.Builder
-			fmt.Fprintf(&b, "Remembered %d thing%s:", len(lines), plural(len(lines)))
-			for _, l := range lines {
-				b.WriteString("\n• " + clipRunes(l, 220))
-			}
-			e.output = b.String()
-		}
-	}
-	return e
-}
-
 // finalBlocks lays out the answer: the collapsed plan on top, then the text.
-func (l *liveMessage) finalBlocks(res agent.Result, chunks []string, refl *event, plan bool) []slack.Block {
+// plan=false (workspace rejects plan blocks) keeps only the text.
+func (l *liveMessage) finalBlocks(res agent.Result, chunks []string, plan bool) []slack.Block {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if !plan {
-		return l.legacyFinal(res, chunks)
-	}
 	var blocks []slack.Block
-	tools, thoughts := l.countTools()
-	if len(l.events) > 0 || refl != nil || res.Status != "done" {
-		var extra []*event
-		if refl != nil {
-			extra = append(extra, refl)
-		}
-		blocks = append(blocks, l.planBlock(doneTitle(tools, thoughts, res.Status), extra...))
+	if plan && (len(l.events) > 0 || res.Status != "done") {
+		tools, thoughts := l.countTools()
+		blocks = append(blocks, l.planBlock(doneTitle(tools, thoughts, res.Status)))
 	}
 	for _, c := range chunks {
 		blocks = append(blocks, section(c))
-	}
-	return blocks
-}
-
-// ---------- classic layout (workspaces without plan blocks) ----------
-
-func (l *liveMessage) legacyWorking() []slack.Block {
-	blocks := []slack.Block{contextLine(fmt.Sprintf("🤖  *%s* is working on it…", l.b.cfg.AgentName))}
-	events := l.events
-	if len(events) > 8 {
-		blocks = append(blocks, contextLine(fmt.Sprintf("_… %d earlier steps_", len(events)-8)))
-		events = events[len(events)-8:]
-	}
-	for _, e := range events {
-		icon := map[string]string{"in_progress": "⏳", "complete": "✅", "error": "⚠️"}[e.status]
-		if e.denied {
-			icon = "🚫"
-		}
-		line := icon + "  " + escape(e.taskTitle())
-		if e.kind == "thought" {
-			line = "💭  _" + escape(clipRunes(e.details, 200)) + "_"
-		}
-		blocks = append(blocks, contextLine(line))
-	}
-	if d := l.draftBlocks(); len(d) > 0 {
-		if len(blocks) > 9 {
-			blocks = blocks[:1]
-		}
-		blocks = append(blocks, d...)
-	}
-	return blocks
-}
-
-func (l *liveMessage) legacyFinal(res agent.Result, chunks []string) []slack.Block {
-	var blocks []slack.Block
-	switch res.Status {
-	case "error":
-		blocks = append(blocks, contextLine("⚠️  *Something went wrong* — details in the trace."))
-	case "cancelled":
-		blocks = append(blocks, contextLine("⏹  *Stopped* before the end."))
-	}
-	for _, c := range chunks {
-		blocks = append(blocks, section(c))
-	}
-	if tools, _ := l.countTools(); tools > 0 {
-		blocks = append(blocks, contextLine(fmt.Sprintf("🛠️ %d tool call%s", tools, plural(tools))))
 	}
 	return blocks
 }
@@ -435,8 +288,7 @@ func (l *liveMessage) legacyFinal(res agent.Result, chunks []string) []slack.Blo
 // Slack folds long text blocks behind "Show more", so keep sections short.
 const finalChunkSize = 1200
 
-// finish replaces the live layout with the answer and returns the ts of
-// the message carrying the plan (the one to update after reflection).
+// finish posts the answer and returns the ts of the message carrying it.
 func (l *liveMessage) finish(ctx context.Context, res agent.Result) string {
 	close(l.stop)
 	if l.native {
@@ -455,20 +307,16 @@ func (l *liveMessage) finish(ctx context.Context, res agent.Result) string {
 	if len(chunks) == 0 {
 		chunks = []string{"🤷"}
 	}
-	// The background reflection still runs (memory) but is no longer shown
-	// in the plan: Paul found it noisy.
-	var refl *event
 	// Slack caps a message at 50 blocks: long answers spill over into
 	// follow-up messages; the plan stays on the first one.
 	const perMessage = 40
 	var firstTS string
 	for i := 0; i < len(chunks); i += perMessage {
-		end := min(i+perMessage, len(chunks))
-		part := chunks[i:end]
+		part := chunks[i:min(i+perMessage, len(chunks))]
 		first := i == 0
 		build := func(plan bool) []slack.Block {
 			if first {
-				return l.finalBlocks(res, part, refl, plan)
+				return l.finalBlocks(res, part, plan)
 			}
 			var blocks []slack.Block
 			for _, c := range part {
@@ -476,7 +324,7 @@ func (l *liveMessage) finish(ctx context.Context, res agent.Result) string {
 			}
 			return blocks
 		}
-		fallback := slack.MsgOptionText(short(res.Output, 300), false)
+		fallback := slack.MsgOptionText(textutil.Short(res.Output, 300), false)
 		if first && l.ts != "" {
 			if _, _, err := l.b.send(ctx, l.channel, l.ts, build, fallback); err == nil {
 				firstTS = l.ts
@@ -491,21 +339,7 @@ func (l *liveMessage) finish(ctx context.Context, res agent.Result) string {
 			firstTS = ts
 		}
 	}
-	if res.Reflecting && firstTS != "" && l.b.plansOK() {
-		l.b.rememberFinal(res.RunID, &finalState{live: l, res: res, chunks: chunks[:min(perMessage, len(chunks))], channel: l.channel, ts: firstTS})
-	}
 	return firstTS
-}
-
-// finalState lets the bot re-render a finished answer when its reflection
-// completes.
-type finalState struct {
-	live    *liveMessage
-	res     agent.Result
-	chunks  []string
-	channel string
-	ts      string
-	at      time.Time
 }
 
 func plural(n int) string {

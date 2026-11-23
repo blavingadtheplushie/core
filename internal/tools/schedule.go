@@ -10,6 +10,7 @@ import (
 
 	"blavingad/internal/core"
 	"blavingad/internal/scheduler"
+	"blavingad/internal/textutil"
 )
 
 func registerSchedule(d *Deps) {
@@ -51,7 +52,7 @@ func registerSchedule(d *Deps) {
 			}
 			if sc.Channel == "" {
 				sc.Channel = rc.Channel
-				sc.ThreadTS = firstNonEmpty(rc.ThreadTS, rc.MessageTS)
+				sc.ThreadTS = textutil.FirstNonEmpty(rc.ThreadTS, rc.MessageTS)
 			} else if d.Slack != nil {
 				if ch, err := d.resolveChannel(ctx, sc.Channel); err == nil {
 					sc.Channel = ch
@@ -86,7 +87,7 @@ func registerSchedule(d *Deps) {
 				if t, err := time.Parse(time.RFC3339, next); err == nil {
 					next = t.In(d.Cfg.Timezone).Format("Jan 2 15:04")
 				}
-				fmt.Fprintf(&b, "- %v \"%v\" cron=%v next=%s — %s\n", r["id"], r["name"], r["cron"], next, short(fmt.Sprint(r["prompt"]), 100))
+				fmt.Fprintf(&b, "- %v \"%v\" cron=%v next=%s — %s\n", r["id"], r["name"], r["cron"], next, textutil.Short(fmt.Sprint(r["prompt"]), 100))
 			}
 			return b.String(), nil
 		},

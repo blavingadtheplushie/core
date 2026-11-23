@@ -11,6 +11,7 @@ import (
 
 	"blavingad/internal/core"
 	"blavingad/internal/store"
+	"blavingad/internal/textutil"
 	"blavingad/internal/tools"
 )
 
@@ -72,7 +73,7 @@ func approvalText(ap *core.Approval) string {
 	}
 	args = strings.ReplaceAll(args, "```", "ˋˋˋ")
 	return fmt.Sprintf("**Approval needed** · `%s`\n%s\n```json\n%s\n```\n-# Requested for %s · expires in 30 min",
-		ap.Tool, short(core.Secrets.Redact(ap.Summary), 300), args, short(ap.RequestedBy, 80))
+		ap.Tool, textutil.Short(core.Secrets.Redact(ap.Summary), 300), args, textutil.Short(ap.RequestedBy, 80))
 }
 
 func buttons(id, tool string, admin bool) []any {
@@ -81,7 +82,7 @@ func buttons(id, tool string, admin bool) []any {
 		{"type": 2, "style": 4, "label": "Deny", "custom_id": "apr:deny:" + id},
 	}
 	if admin {
-		row = append(row, map[string]any{"type": 2, "style": 2, "label": short("Always allow "+tool, 70), "custom_id": "apr:always:" + id})
+		row = append(row, map[string]any{"type": 2, "style": 2, "label": textutil.Short("Always allow "+tool, 70), "custom_id": "apr:always:" + id})
 	}
 	return []any{map[string]any{"type": 1, "components": row}}
 }
@@ -129,9 +130,9 @@ func resolvedText(ap *core.Approval) string {
 	if label == "" {
 		label = ap.Status
 	}
-	s := fmt.Sprintf("%s · `%s` · %s", label, ap.Tool, short(core.Secrets.Redact(ap.Summary), 200))
+	s := fmt.Sprintf("%s · `%s` · %s", label, ap.Tool, textutil.Short(core.Secrets.Redact(ap.Summary), 200))
 	if ap.DecidedBy != "" {
-		s += "\n-# By " + short(ap.DecidedBy, 80)
+		s += "\n-# By " + textutil.Short(ap.DecidedBy, 80)
 	} else if ap.Status == "expired" {
 		s += "\n-# Nobody answered within 30 min."
 	}
@@ -182,5 +183,5 @@ func (b *Bridge) handleButton(ctx context.Context, interactionID, token, customI
 	label := map[string]string{"approve": "Approved", "deny": "Denied", "always": "Approved (always allowed from now on)"}[action]
 	// Update the clicked message right away (ResolveApproval edits it too).
 	tools.DiscordDo(ctx, "POST", "/interactions/"+interactionID+"/"+token+"/callback",
-		map[string]any{"type": 7, "data": map[string]any{"content": label + " · `" + ap.Tool(id) + "`\n-# By " + short(u.display(), 80), "components": []any{}}})
+		map[string]any{"type": 7, "data": map[string]any{"content": label + " · `" + ap.Tool(id) + "`\n-# By " + textutil.Short(u.display(), 80), "components": []any{}}})
 }

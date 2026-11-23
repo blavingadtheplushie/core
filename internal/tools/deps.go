@@ -22,6 +22,7 @@ import (
 	"blavingad/internal/proxy"
 	"blavingad/internal/selfupdate"
 	"blavingad/internal/store"
+	"blavingad/internal/textutil"
 	"blavingad/internal/vault"
 )
 
@@ -185,14 +186,6 @@ func (r cmdResult) String() string {
 	return Clip(fmt.Sprintf("exit=%d (%s)\n%s", r.ExitCode, r.Duration.Round(time.Millisecond), r.Output), 0)
 }
 
-func short(s string, n int) string {
-	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
-	if len([]rune(s)) <= n {
-		return s
-	}
-	return string([]rune(s)[:n]) + "…"
-}
-
 func field(args json.RawMessage, key string) string {
 	var m map[string]any
 	json.Unmarshal(args, &m)
@@ -205,15 +198,8 @@ func field(args json.RawMessage, key string) string {
 func summarizeField(prefix, key string, n int) func(json.RawMessage) string {
 	return func(args json.RawMessage) string {
 		if v := field(args, key); v != "" {
-			return prefix + short(v, n)
+			return prefix + textutil.Short(v, n)
 		}
 		return ""
 	}
-}
-
-func trunc(s string, n int) string {
-	if len([]rune(s)) <= n {
-		return s
-	}
-	return string([]rune(s)[:n]) + "…"
 }

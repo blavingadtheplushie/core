@@ -16,17 +16,18 @@ import (
 	"time"
 
 	"blavingad/internal/core"
+	"blavingad/internal/textutil"
 )
 
 // Signal goes through a signal-cli-rest-api container (json-rpc mode) that
 // listens on the loopback of the LXC. Group joins by invite link are not in
 // the REST API, so they use signal-cli's JSON-RPC socket inside the container.
 func signalBase() string {
-	return strings.TrimRight(firstNonEmpty(os.Getenv("SIGNAL_API_URL"), "http://127.0.0.1:8085"), "/")
+	return strings.TrimRight(textutil.FirstNonEmpty(os.Getenv("SIGNAL_API_URL"), "http://127.0.0.1:8085"), "/")
 }
-func signalNumber() string { return firstNonEmpty(os.Getenv("SIGNAL_NUMBER"), "+15103287661") }
+func signalNumber() string { return textutil.FirstNonEmpty(os.Getenv("SIGNAL_NUMBER"), "+15103287661") }
 func signalContainer() string {
-	return firstNonEmpty(os.Getenv("SIGNAL_CONTAINER"), "signal-api")
+	return textutil.FirstNonEmpty(os.Getenv("SIGNAL_CONTAINER"), "signal-api")
 }
 
 var signalHTTP = &http.Client{Timeout: 60 * time.Second}

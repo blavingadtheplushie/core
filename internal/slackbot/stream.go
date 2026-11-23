@@ -1,6 +1,7 @@
 package slackbot
 
 import (
+	"blavingad/internal/textutil"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,20 +13,19 @@ import (
 	"github.com/slack-go/slack"
 )
 
-// Native Slack streaming (chat.startStream / appendStream / stopStream),
-// used when the stream_replies setting is on and the reply goes in a thread.
+// Native Slack streaming (chat.startStream / appendStream / stopStream).
 //
 // While the agent works, tool calls and thoughts are streamed as task_update
 // chunks (rendered by Slack as a live plan) and the answer text is streamed
-// as markdown_text once it is clearly an answer (see looksLikeAnswer). When the run ends the stream is stopped and the
-// message is replaced (chat.update) by the usual final layout, so the stored
-// answer is identical to the non-streamed one (clean mrkdwn, full plan,
-// reflection updates). Any API error falls back to the classic live message.
+// as markdown_text once it is clearly an answer (see looksLikeAnswer). The
+// stream is closed append-only (finishNative). If Slack refuses or drops
+// the stream, nothing more is sent until the end: finish() then replaces
+// the message (or reposts it) with the final layout.
 
 const nativeFlushEvery = 700 * time.Millisecond // appendStream is Tier 4 (100+/min)
 
-// startNative opens the stream. It returns false when the classic live
-// message must be used instead.
+// startNative opens the stream. It returns false when Slack refuses it (the
+// answer is then posted once at the end).
 func (l *liveMessage) startNative(ctx context.Context) bool {
 	if l.thread == "" || l.user == "" || l.b.API == nil {
 		return false
@@ -41,7 +41,7 @@ func (l *liveMessage) startNative(ctx context.Context) bool {
 	}
 	_, ts, err := l.b.API.StartStreamContext(ctx, l.channel, opts...)
 	if err != nil || ts == "" {
-		slog.Warn("native Slack streaming unavailable, using the classic live message", "err", err)
+		slog.Warn("native Slack streaming unavailable, the answer will be posted at the end", "err", err)
 		return false
 	}
 	l.ts, l.native, l.sent = ts, true, map[int]string{}
@@ -53,7 +53,7 @@ func (l *liveMessage) startNative(ctx context.Context) bool {
 			case <-l.stop:
 				return
 			case <-t.C:
-				l.flushNative(context.Background(), false)
+				l.flushNative(context.Background())
 			}
 		}
 	}()
@@ -70,14 +70,14 @@ func (l *liveMessage) nativeChunks() []slack.StreamChunk {
 		c := slack.NewTaskUpdateChunk(fmt.Sprintf("t%d", i+1), e.taskTitle())
 		c.Status = slack.TaskCardStatus(e.status)
 		if d := strings.TrimSpace(e.details); d != "" {
-			c.Details = clipRunes(d, 600)
+			c.Details = textutil.Clip(d, 600)
 		}
 		out := strings.TrimSpace(e.output)
 		if e.kind == "tool" && privateOutput[e.category] && !e.denied && out != "" {
 			out = "(result hidden in Slack — see the trace)"
 		}
 		if out != "" {
-			c.Output = clipRunes(out, 600)
+			c.Output = textutil.Clip(out, 600)
 		}
 		sig, _ := json.Marshal(c)
 		if l.sent[i] == string(sig) {
@@ -99,7 +99,7 @@ func (l *liveMessage) nativeChunks() []slack.StreamChunk {
 	// Slack keeps streamed markdown_text even after chat.update, so once
 	// text is streamed the message is never rewritten: finishNative only
 	// appends what is missing (or deletes and reposts if the text diverged).
-	if !streamAnswerText || (l.streamed == "" && !looksLikeAnswer(l.draft)) {
+	if l.streamed == "" && !looksLikeAnswer(l.draft) {
 		return chunks
 	}
 	if conv := streamMarkdown(l.draft); !l.textBroken && conv != "" {
@@ -120,49 +120,37 @@ func (l *liveMessage) nativeChunks() []slack.StreamChunk {
 // the answer: narration next to tool calls is almost always one short line.
 const streamAnswerAfter = 240
 
-// streamAnswerText toggles streaming the answer text itself.
-var streamAnswerText = true
-
 func looksLikeAnswer(draft string) bool {
 	d := strings.TrimSpace(draft)
 	return utf8.RuneCountInString(d) >= streamAnswerAfter || strings.Contains(d, "\n\n")
 }
 
-// flushNative sends pending chunks. last=true closes the stream.
-func (l *liveMessage) flushNative(ctx context.Context, last bool, extra ...slack.StreamChunk) {
+// flushNative appends what changed since the last flush.
+func (l *liveMessage) flushNative(ctx context.Context) {
 	l.nmu.Lock()
 	defer l.nmu.Unlock()
 	if !l.native || l.closed {
 		return
 	}
-	chunks := append(l.nativeChunks(), extra...)
-	var err error
-	switch {
-	case last:
+	chunks := l.nativeChunks()
+	if len(chunks) == 0 {
+		return
+	}
+	_, _, err := l.b.API.AppendStreamContext(ctx, l.channel, l.ts, slack.MsgOptionChunks(chunks...))
+	if err == nil {
+		return
+	}
+	slog.Warn("native Slack stream update failed", "err", err)
+	if strings.Contains(err.Error(), "message_not_in_streaming_state") {
+		// Slack closed the stream (10 min cap, or a long retry pause):
+		// stay quiet, finish() posts the final layout.
 		l.closed = true
-		opts := []slack.MsgOption{}
-		if len(chunks) > 0 {
-			opts = append(opts, slack.MsgOptionChunks(chunks...))
-		}
-		_, _, err = l.b.API.StopStreamContext(ctx, l.channel, l.ts, opts...)
-	case len(chunks) > 0:
-		_, _, err = l.b.API.AppendStreamContext(ctx, l.channel, l.ts, slack.MsgOptionChunks(chunks...))
+		return
 	}
-	if err != nil {
-		slog.Warn("native Slack stream update failed", "err", err, "last", last)
-		if !last && strings.Contains(err.Error(), "message_not_in_streaming_state") {
-			// Slack closed the stream (10 min cap, or a long retry pause):
-			// carry on with the classic chat.update live message.
-			l.fallbackClassic(ctx)
-			return
-		}
-		if !last {
-			// Stop appending; finish() still closes the stream and posts the answer.
-			l.mu.Lock()
-			l.textBroken = true
-			l.mu.Unlock()
-		}
-	}
+	// Stop appending text; finish() still closes the stream and posts the answer.
+	l.mu.Lock()
+	l.textBroken = true
+	l.mu.Unlock()
 }
 
 // streamMarkdown turns the model's Slack-mrkdwn draft into the standard
@@ -224,7 +212,16 @@ const maxStopText = 8000
 func (l *liveMessage) finishNative(ctx context.Context, output string, ok bool) int {
 	l.nmu.Lock()
 	defer l.nmu.Unlock()
-	if !l.native || l.closed {
+	if !l.native {
+		return nativeUpdate
+	}
+	if l.closed {
+		// Slack dropped the stream: streamed text can't be edited away.
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		if l.streamed != "" || l.earlierText {
+			return nativeRepost
+		}
 		return nativeUpdate
 	}
 	chunks := l.nativeChunks()
@@ -255,31 +252,4 @@ func (l *liveMessage) finishNative(ctx context.Context, output string, ok bool) 
 		}
 	}
 	return mode
-}
-
-// fallbackClassic switches a stream Slack has closed to the classic live
-// message. Called with nmu held. Streamed text cannot be removed by
-// chat.update, so in that case the message is replaced by a new one.
-func (l *liveMessage) fallbackClassic(ctx context.Context) {
-	l.closed, l.native = true, false
-	l.mu.Lock()
-	hadText := l.streamed != "" || l.earlierText
-	l.dirty = true
-	l.mu.Unlock()
-	slog.Info("native Slack stream closed by Slack, falling back to the classic live message", "had_text", hadText)
-	if hadText && l.ts != "" {
-		if _, _, err := l.b.API.DeleteMessageContext(ctx, l.channel, l.ts); err == nil {
-			l.ts = ""
-		}
-	}
-	if l.ts == "" {
-		opts := []slack.MsgOption{slack.MsgOptionText("Working on it…", false)}
-		if l.thread != "" {
-			opts = append(opts, slack.MsgOptionTS(l.thread))
-		}
-		if _, ts, err := l.b.send(ctx, l.channel, "", func(plan bool) []slack.Block { return l.workingBlocks(plan) }, opts...); err == nil {
-			l.ts = ts
-		}
-	}
-	l.classicTicker()
 }

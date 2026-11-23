@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"blavingad/internal/textutil"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -131,14 +132,14 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request, style, path string
 			b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
 			if retryable(resp.StatusCode, b) {
-				why := fmt.Sprintf("HTTP %d: %s", resp.StatusCode, clip(string(b), 200))
+				why := fmt.Sprintf("HTTP %d: %s", resp.StatusCode, textutil.Trunc(string(b), 200))
 				p.markDown(c.up.Name, why)
 				p.logUsage(key.ID, c.up.Name, c.model, resp.StatusCode, stream, start, usage{}, why)
 				slog.Warn("llm proxy fallback", "upstream", c.up.Name, "status", resp.StatusCode)
 				lastStatus, lastBody = resp.StatusCode, b
 				continue
 			}
-			p.logUsage(key.ID, c.up.Name, c.model, resp.StatusCode, stream, start, usage{}, clip(string(b), 200))
+			p.logUsage(key.ID, c.up.Name, c.model, resp.StatusCode, stream, start, usage{}, textutil.Trunc(string(b), 200))
 			copyHeaders(w, resp.Header)
 			w.WriteHeader(resp.StatusCode)
 			w.Write(b)
@@ -157,13 +158,6 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request, style, path string
 		return
 	}
 	apiError(w, style, 502, "api_error", "every upstream failed")
-}
-
-func clip(s string, n int) string {
-	if len(s) > n {
-		return s[:n] + "…"
-	}
-	return s
 }
 
 func (p *Proxy) send(ctx context.Context, in *http.Request, u Upstream, path string, body []byte) (*http.Response, error) {

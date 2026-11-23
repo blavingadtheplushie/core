@@ -19,6 +19,7 @@ import (
 	"blavingad/internal/scheduler"
 	"blavingad/internal/selfupdate"
 	"blavingad/internal/store"
+	"blavingad/internal/textutil"
 	"blavingad/internal/vault"
 )
 
@@ -32,7 +33,7 @@ func page(r *http.Request, size int) (limit, offset, p int) {
 
 func actor(r *http.Request) string {
 	if u := currentUser(r); u != nil {
-		return firstNonEmpty(u.Name, u.Email)
+		return textutil.FirstNonEmpty(u.Name, u.Email)
 	}
 	return "web"
 }
@@ -124,7 +125,7 @@ func (s *Server) integrations() []map[string]any {
 	}
 	gh := "not configured"
 	if c.GitHubConfigured() {
-		gh = firstNonEmpty(c.GitHubUser, "token configured")
+		gh = textutil.FirstNonEmpty(c.GitHubUser, "token configured")
 		if c.SelfRepo != "" {
 			gh += " · " + c.SelfRepo
 		}
@@ -163,20 +164,13 @@ func (s *Server) integrations() []map[string]any {
 		{"key": "embed", "label": "Semantic memory", "emoji": "🧬", "ok": c.EmbedConfigured(), "detail": embed},
 		{"key": "github", "label": "GitHub", "emoji": "🐙", "ok": c.GitHubConfigured(), "detail": gh},
 		{"key": "email", "label": "Email", "emoji": "📬", "ok": emailOK, "configured": c.IMAPConfigured() || c.SMTPConfigured(), "detail": emailDetail},
-		{"key": "cloudflare", "label": "Cloudflare", "emoji": "☁️", "ok": c.CloudflareConfigured(), "detail": map[bool]string{true: "account " + short(c.CloudflareAccount, 8), false: "not configured"}[c.CloudflareConfigured()]},
+		{"key": "cloudflare", "label": "Cloudflare", "emoji": "☁️", "ok": c.CloudflareConfigured(), "detail": map[bool]string{true: "account " + textutil.Short(c.CloudflareAccount, 8), false: "not configured"}[c.CloudflareConfigured()]},
 		{"key": "docker", "label": "Docker", "emoji": "🐳", "ok": c.DockerEnabled, "detail": docker},
 		s.tunnelIntegration(),
 		signalIntegration(),
 		discordIntegration(),
 		{"key": "oidc", "label": "SSO (OIDC)", "emoji": "🛡️", "ok": c.OIDCConfigured(), "detail": oidcDetail},
 	}
-}
-
-func short(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }
 
 // ---------- runs ----------
@@ -281,7 +275,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	u := currentUser(r)
 	started := make(chan string, 1)
 	go s.runner.Run(context.Background(), agent.Request{
-		Source: "web", Channel: "web", ChannelName: "web", ThreadTS: body.Thread, UserName: firstNonEmpty(u.Name, u.Email, "admin"),
+		Source: "web", Channel: "web", ChannelName: "web", ThreadTS: body.Thread, UserName: textutil.FirstNonEmpty(u.Name, u.Email, "admin"),
 		Text: body.Message, History: history, OnStart: func(id string) { started <- id },
 	})
 	select {
@@ -596,7 +590,7 @@ func (s *Server) putPersona(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "persona too short")
 		return
 	}
-	s.st.DB.Exec(`INSERT INTO persona_versions(content, reason, author, created_at) VALUES(?,?,?,?)`, body.Content, firstNonEmpty(body.Reason, "edited from the web"), actor(r), store.Now())
+	s.st.DB.Exec(`INSERT INTO persona_versions(content, reason, author, created_at) VALUES(?,?,?,?)`, body.Content, textutil.FirstNonEmpty(body.Reason, "edited from the web"), actor(r), store.Now())
 	s.st.DB.Exec(`INSERT INTO evolutions(id, kind, summary, details, status, created_at) VALUES(?,?,?,?,?,?)`, store.NewID("evo"), "persona", "Persona edited by "+actor(r), body.Content, "live", store.Now())
 	s.st.Audit(actor(r), "persona.update", "", nil)
 	writeJSON(w, 200, map[string]bool{"ok": true})
@@ -650,7 +644,7 @@ func (s *Server) createSchedule(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "prompt is required")
 		return
 	}
-	id, next, err := scheduler.Create(s.st, s.cfg.Timezone, scheduler.Schedule{Name: firstNonEmpty(body.Name, "Task"), Prompt: body.Prompt, Cron: body.Cron, RunAt: body.At, Channel: body.Channel, CreatedBy: actor(r)})
+	id, next, err := scheduler.Create(s.st, s.cfg.Timezone, scheduler.Schedule{Name: textutil.FirstNonEmpty(body.Name, "Task"), Prompt: body.Prompt, Cron: body.Cron, RunAt: body.At, Channel: body.Channel, CreatedBy: actor(r)})
 	if err != nil {
 		writeErr(w, 400, err.Error())
 		return
@@ -1095,7 +1089,7 @@ func (s *Server) deleteVaultItem(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) llmDetail() string {
 	set := s.runner.Settings()
-	base := firstNonEmpty(set.BaseURL, s.cfg.LLMBaseURL)
+	base := textutil.FirstNonEmpty(set.BaseURL, s.cfg.LLMBaseURL)
 	style := map[string]string{llm.StyleOpenAI: "OpenAI API", llm.StyleAnthropic: "Anthropic API"}[set.APIStyle]
 	return set.Model + " · " + host(base) + " · " + style
 }
@@ -1132,7 +1126,7 @@ func (s *Server) llmTest(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": core.Secrets.Redact(err.Error()), "model": set.Model, "api_style": set.APIStyle})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"ok": true, "reply": short(res.Message.Content, 200), "model": set.Model, "api_style": set.APIStyle,
+	writeJSON(w, 200, map[string]any{"ok": true, "reply": textutil.Short(res.Message.Content, 200), "model": set.Model, "api_style": set.APIStyle,
 		"latency_ms": time.Since(start).Milliseconds(), "tokens": res.Usage.PromptTokens + res.Usage.CompletionTokens})
 }
 

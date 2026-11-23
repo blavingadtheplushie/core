@@ -20,6 +20,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"blavingad/internal/store"
+	"blavingad/internal/textutil"
 )
 
 const (
@@ -220,7 +221,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		fail(err.Error(), nil)
 		return
 	}
-	name := firstNonEmpty(claims.Name, claims.PreferredUsername, claims.Email)
+	name := textutil.FirstNonEmpty(claims.Name, claims.PreferredUsername, claims.Email)
 	id, err := s.upsertUser(claims.Sub, claims.Email, name, claims.Picture)
 	if err != nil {
 		fail("Could not save the user.", err)
@@ -244,7 +245,7 @@ func (s *Server) authorize(email string, groups []string) error {
 			return nil
 		}
 	}
-	return errors.New("Your account is not allowed on this dashboard.")
+	return errors.New("your account is not allowed on this dashboard")
 }
 
 var (

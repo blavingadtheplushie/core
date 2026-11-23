@@ -18,6 +18,7 @@ import (
 	"github.com/slack-go/slack"
 
 	"blavingad/internal/core"
+	"blavingad/internal/textutil"
 )
 
 // The ElevenLabs API key lives in the vault (password field of this item).
@@ -69,7 +70,7 @@ func (d *Deps) elevenDo(ctx context.Context, key, method, path string, body any)
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
 	if resp.StatusCode >= 300 {
-		return nil, "", fmt.Errorf("elevenlabs %s: %s", resp.Status, trunc(string(out), 500))
+		return nil, "", fmt.Errorf("elevenlabs %s: %s", resp.Status, textutil.Trunc(string(out), 500))
 	}
 	return out, resp.Header.Get("Content-Type"), nil
 }
@@ -231,7 +232,7 @@ func registerElevenLabs(d *Deps) {
 				a.Title = name
 			}
 			_, err = d.Slack.UploadFileContext(ctx, slack.UploadFileParameters{File: p, FileSize: len(audio), Filename: name, Title: a.Title,
-				Channel: rc.Channel, ThreadTimestamp: firstNonEmpty(rc.ThreadTS, rc.MessageTS), InitialComment: a.Comment})
+				Channel: rc.Channel, ThreadTimestamp: textutil.FirstNonEmpty(rc.ThreadTS, rc.MessageTS), InitialComment: a.Comment})
 			if err != nil {
 				return res + " — Slack upload failed: " + err.Error(), nil
 			}

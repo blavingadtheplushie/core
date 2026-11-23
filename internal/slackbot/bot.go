@@ -25,6 +25,7 @@ import (
 	"blavingad/internal/llm"
 	"blavingad/internal/memory"
 	"blavingad/internal/store"
+	"blavingad/internal/textutil"
 )
 
 type Bot struct {
@@ -47,7 +48,6 @@ type Bot struct {
 	mu       sync.Mutex
 	locks    map[string]*sync.Mutex
 	chanName map[string]string
-	finals   map[string]*finalState
 	noPlans  atomic.Bool // workspace rejected plan blocks
 }
 
@@ -67,16 +67,16 @@ func (b *Bot) Start(ctx context.Context) error {
 	go b.loop(ctx)
 	go b.resumeInterrupted(ctx)
 	go b.digestLoop(ctx)
-	go b.watchReflections(ctx)
 	go func() {
-		for {
-			if err := b.sm.RunContext(ctx); err != nil && ctx.Err() == nil {
-				slog.Warn("socket mode stopped, reconnecting", "err", err)
-				b.Connected = false
-				time.Sleep(5 * time.Second)
-				continue
+		// RunContext only returns on error or when ctx is done.
+		for ctx.Err() == nil {
+			err := b.sm.RunContext(ctx)
+			if ctx.Err() != nil {
+				return
 			}
-			return
+			slog.Warn("socket mode stopped, reconnecting", "err", err)
+			b.Connected = false
+			time.Sleep(5 * time.Second)
 		}
 	}()
 	return nil
@@ -132,14 +132,14 @@ func (b *Bot) loop(ctx context.Context) {
 
 func (b *Bot) userName(ctx context.Context, id string) string {
 	if p, ok := b.mem.GetPerson(id); ok && (p.RealName != "" || p.Name != "") {
-		return firstNonEmpty(p.RealName, p.Name)
+		return textutil.FirstNonEmpty(p.RealName, p.Name)
 	}
 	u, err := b.API.GetUserInfoContext(ctx, id)
 	if err != nil {
 		return id
 	}
-	b.mem.UpsertPerson(memory.Person{SlackID: u.ID, Name: u.Name, RealName: firstNonEmpty(u.Profile.DisplayName, u.RealName), Title: u.Profile.Title, Email: u.Profile.Email, TZ: u.TZ})
-	return firstNonEmpty(u.Profile.DisplayName, u.RealName, u.Name)
+	b.mem.UpsertPerson(memory.Person{SlackID: u.ID, Name: u.Name, RealName: textutil.FirstNonEmpty(u.Profile.DisplayName, u.RealName), Title: u.Profile.Title, Email: u.Profile.Email, TZ: u.TZ})
+	return textutil.FirstNonEmpty(u.Profile.DisplayName, u.RealName, u.Name)
 }
 
 func (b *Bot) channelName(ctx context.Context, id string) string {
@@ -307,7 +307,7 @@ func (b *Bot) onBotMessage(ctx context.Context, ev *slackevents.MessageEvent, me
 		slog.Info("ignoring bot message: not whitelisted", "user", ev.User)
 		return
 	}
-	thread := firstNonEmpty(ev.ThreadTimeStamp, ev.TimeStamp)
+	thread := textutil.FirstNonEmpty(ev.ThreadTimeStamp, ev.TimeStamp)
 	if n := b.botStreak(ev.Channel, thread, ev.TimeStamp); n > limit {
 		slog.Info("ignoring bot message: bot reply limit reached", "user", ev.User, "thread", thread, "streak", n, "limit", limit)
 		return
@@ -342,7 +342,7 @@ func (b *Bot) downloadFiles(ctx context.Context, ts string, files []slack.File) 
 			notes = append(notes, fmt.Sprintf("%s (too large, %d MB, not downloaded)", f.Name, f.Size>>20))
 			continue
 		}
-		url := firstNonEmpty(f.URLPrivateDownload, f.URLPrivate)
+		url := textutil.FirstNonEmpty(f.URLPrivateDownload, f.URLPrivate)
 		if url == "" {
 			continue
 		}
@@ -451,7 +451,7 @@ func (b *Bot) recentChannel(ctx context.Context, channel, before string) string 
 	}
 	var lines []string
 	for i := len(rows) - 1; i >= 0; i-- {
-		lines = append(lines, fmt.Sprintf("%v: %v", rows[i]["who"], short(fmt.Sprint(rows[i]["text"]), 300)))
+		lines = append(lines, fmt.Sprintf("%v: %v", rows[i]["who"], textutil.Short(fmt.Sprint(rows[i]["text"]), 300)))
 	}
 	return "## Latest messages in this channel (context, not necessarily addressed to you)\n" + strings.Join(lines, "\n")
 }
@@ -464,7 +464,7 @@ func (b *Bot) respond(ctx context.Context, ev *slackevents.MessageEvent, files [
 		// like a channel mention.
 		replyThread = ev.TimeStamp
 	}
-	key := ev.Channel + ":" + firstNonEmpty(ev.ThreadTimeStamp, ev.TimeStamp)
+	key := ev.Channel + ":" + textutil.FirstNonEmpty(ev.ThreadTimeStamp, ev.TimeStamp)
 	l := b.lock(key)
 	l.Lock()
 	defer l.Unlock()
@@ -524,7 +524,7 @@ func (b *Bot) onReaction(ctx context.Context, ev *slackevents.ReactionAddedEvent
 	case "octagonal_sign", "stop_sign", "no_entry":
 		var thread string
 		b.st.DB.QueryRow(`SELECT COALESCE(NULLIF(thread_ts,''), ts) FROM slack_messages WHERE channel = ? AND ts = ?`, ev.Item.Channel, ev.Item.Timestamp).Scan(&thread)
-		n := b.runner.CancelThread(ev.Item.Channel, firstNonEmpty(thread, ev.Item.Timestamp))
+		n := b.runner.CancelThread(ev.Item.Channel, textutil.FirstNonEmpty(thread, ev.Item.Timestamp))
 		if n == 0 {
 			n = b.runner.CancelThread(ev.Item.Channel, ev.Item.Timestamp)
 		}
@@ -596,7 +596,7 @@ func (b *Bot) Post(ctx context.Context, channel, thread string, n core.Notice) (
 	}
 	fallback := noticeText(n)
 	if n.Body != "" {
-		fallback = short(fallback+" — "+n.Body, 300)
+		fallback = textutil.Short(fallback+" — "+n.Body, 300)
 	}
 	opts := []slack.MsgOption{slack.MsgOptionText(fallback, false)}
 	if thread != "" {
@@ -623,23 +623,6 @@ func tsToTime(ts string) time.Time {
 	var sec, nsec int64
 	fmt.Sscanf(ts, "%d.%d", &sec, &nsec)
 	return time.Unix(sec, 0)
-}
-
-func short(s string, n int) string {
-	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
-	if len([]rune(s)) <= n {
-		return s
-	}
-	return string([]rune(s)[:n]) + "…"
-}
-
-func firstNonEmpty(v ...string) string {
-	for _, s := range v {
-		if s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 // resumeInterrupted relaunches the Slack runs a restart cut off (recent ones

@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/slack-go/slack"
 )
@@ -37,55 +36,4 @@ func (b *Bot) send(ctx context.Context, channel, ts string, build func(plan bool
 		newTS = ts
 	}
 	return ch, newTS, err
-}
-
-func (b *Bot) rememberFinal(runID string, f *finalState) {
-	f.at = time.Now()
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.finals == nil {
-		b.finals = map[string]*finalState{}
-	}
-	b.finals[runID] = f
-	for id, old := range b.finals {
-		if time.Since(old.at) > 15*time.Minute {
-			delete(b.finals, id)
-		}
-	}
-}
-
-func (b *Bot) takeFinal(runID string) *finalState {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	f := b.finals[runID]
-	delete(b.finals, runID)
-	return f
-}
-
-// watchReflections completes the "Reflection" task of an answer's plan once
-// the background reflection is done.
-func (b *Bot) watchReflections(ctx context.Context) {
-	ch, unsub := b.bus.Subscribe()
-	defer unsub()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case ev := <-ch:
-			if ev.Type != "run.reflected" {
-				continue
-			}
-			data, _ := ev.Data.(map[string]any)
-			runID, _ := data["run_id"].(string)
-			f := b.takeFinal(runID)
-			if f == nil {
-				continue
-			}
-			lines, _ := data["lines"].([]string)
-			refl := reflectionEvent(true, true, lines)
-			b.send(ctx, f.channel, f.ts, func(plan bool) []slack.Block {
-				return f.live.finalBlocks(f.res, f.chunks, refl, plan)
-			}, slack.MsgOptionText(short(f.res.Output, 300), false))
-		}
-	}
 }

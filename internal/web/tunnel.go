@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"blavingad/internal/cloudflare"
+	"blavingad/internal/textutil"
 )
 
 // tunnel describes the Cloudflare Tunnel and its routes for the dashboard.
@@ -83,7 +84,7 @@ func (s *Server) tunnelIntegration() map[string]any {
 	detail := "not configured"
 	switch {
 	case cf.Configured() && id != "":
-		detail = "tunnel " + short(id, 8)
+		detail = "tunnel " + textutil.Short(id, 8)
 	case cf.Configured():
 		detail = "not set up yet (ask it: tunnel_setup)"
 	}

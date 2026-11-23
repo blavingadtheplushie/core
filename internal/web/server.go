@@ -285,12 +285,3 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
-
-func firstNonEmpty(v ...string) string {
-	for _, s := range v {
-		if s != "" {
-			return s
-		}
-	}
-	return ""
-}

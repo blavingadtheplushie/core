@@ -1,6 +1,7 @@
 package slackbot
 
 import (
+	"blavingad/internal/textutil"
 	"context"
 	"log/slog"
 	"strings"
@@ -56,5 +57,5 @@ func (b *Bot) agentThinking(ctx context.Context, channel, thread string, first b
 
 func threadTitle(text string) string {
 	text = strings.Join(strings.Fields(text), " ")
-	return clipRunes(text, 60)
+	return textutil.Clip(text, 60)
 }

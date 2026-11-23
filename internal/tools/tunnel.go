@@ -12,13 +12,14 @@ import (
 
 	"blavingad/internal/cloudflare"
 	"blavingad/internal/core"
+	"blavingad/internal/textutil"
 	"blavingad/internal/vault"
 )
 
 func (d *Deps) tunnel() (*cloudflare.Client, string, error) {
 	cf := cloudflare.New(d.Cfg)
 	if !cf.Configured() {
-		return nil, "", errors.New("Cloudflare is not configured: set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID")
+		return nil, "", errors.New("cloudflare is not configured: set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID")
 	}
 	id := cloudflare.TunnelID(d.Cfg, d.St)
 	if id == "" {
@@ -78,7 +79,7 @@ func registerTunnel(d *Deps) {
 			"path":     core.Str("Optional path regex to restrict the route (e.g. ^/api)."),
 		}, "hostname", "service"),
 		Summarize: func(args json.RawMessage) string {
-			return "Tunnel: " + field(args, "hostname") + " → " + short(field(args, "service"), 40)
+			return "Tunnel: " + field(args, "hostname") + " → " + textutil.Short(field(args, "service"), 40)
 		},
 		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
 			a, err := core.Parse[struct{ Hostname, Service, Path string }](args)
@@ -137,7 +138,7 @@ func (d *Deps) setupTunnel(ctx context.Context, rc *core.RunContext, name string
 	}
 	var notes []string
 	if id == "" {
-		name = firstNonEmpty(slugify(name), slugify(d.Cfg.AgentName), "blavingad")
+		name = textutil.FirstNonEmpty(slugify(name), slugify(d.Cfg.AgentName), "blavingad")
 		t, found, err := cf.FindTunnel(ctx, name)
 		if err != nil {
 			return "", err

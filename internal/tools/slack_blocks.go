@@ -10,6 +10,7 @@ import (
 	"github.com/slack-go/slack"
 
 	"blavingad/internal/core"
+	"blavingad/internal/textutil"
 )
 
 // jsonBlock passes a model-authored Block Kit block through untouched.
@@ -125,7 +126,7 @@ func registerSlackBlocks(d *Deps) {
 			}
 			thread := a.ThreadTS
 			if thread == "" && ch == rc.Channel {
-				thread = firstNonEmpty(rc.ThreadTS, rc.MessageTS)
+				thread = textutil.FirstNonEmpty(rc.ThreadTS, rc.MessageTS)
 			}
 			if thread == "none" {
 				thread = ""

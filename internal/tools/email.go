@@ -12,6 +12,7 @@ import (
 
 	"blavingad/internal/core"
 	"blavingad/internal/mail"
+	"blavingad/internal/textutil"
 )
 
 func splitAddrs(s []string) []string {
@@ -116,7 +117,7 @@ func registerEmail(d *Deps) {
 				if dir == "out" {
 					arrow = "📤 to " + to
 				}
-				fmt.Fprintf(&b, "#%d %s %s — \"%s\"\n   %s\n", id, strings.Split(at, ".")[0], arrow, subj, short(preview, 150))
+				fmt.Fprintf(&b, "#%d %s %s — \"%s\"\n   %s\n", id, strings.Split(at, ".")[0], arrow, subj, textutil.Short(preview, 150))
 			}
 			if b.Len() == 0 {
 				return "Mailbox is empty.", nil
@@ -143,10 +144,10 @@ func registerEmail(d *Deps) {
 		Name: "email_send", Category: "email", Emoji: "📤", Risk: core.RiskSensitive, Available: outOK,
 		Description: "Sends a plain-text email from your address " + d.Cfg.EmailFrom + ". Sign as " + d.Cfg.AgentName + ".",
 		Params: core.Obj(map[string]any{
-			"to":      core.StrList("Recipients."),
-			"cc":      core.StrList("CC (optional)."),
-			"subject": core.Str("Subject."),
-			"body":    core.Str("Message body in plain text."),
+			"to":          core.StrList("Recipients."),
+			"cc":          core.StrList("CC (optional)."),
+			"subject":     core.Str("Subject."),
+			"body":        core.Str("Message body in plain text."),
 			"attachments": core.StrList("Files to attach (paths in the workspace or /tmp, optional, 20 MB total max)."),
 		}, "to", "subject", "body"),
 		Summarize: func(args json.RawMessage) string {
@@ -154,7 +155,7 @@ func registerEmail(d *Deps) {
 				To      []string
 				Subject string
 			}](args)
-			return fmt.Sprintf("Email to %s: \"%s\"", strings.Join(a.To, ", "), short(a.Subject, 60))
+			return fmt.Sprintf("Email to %s: \"%s\"", strings.Join(a.To, ", "), textutil.Short(a.Subject, 60))
 		},
 		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
 			a, _ := core.Parse[struct {
@@ -210,7 +211,7 @@ func registerEmail(d *Deps) {
 			if !strings.HasPrefix(strings.ToLower(subject), "re:") {
 				subject = "Re: " + subject
 			}
-			quoted := "\n\n" + "On " + strings.Split(orig.CreatedAt, "T")[0] + ", " + orig.From + " wrote:\n> " + strings.ReplaceAll(trunc(orig.Body, 3000), "\n", "\n> ")
+			quoted := "\n\n" + "On " + strings.Split(orig.CreatedAt, "T")[0] + ", " + orig.From + " wrote:\n> " + strings.ReplaceAll(textutil.Trunc(orig.Body, 3000), "\n", "\n> ")
 			e, err := d.Mail.Send(ctx, []string{mail.ExtractAddress(orig.From)}, splitAddrs(a.Cc), subject, a.Body+quoted, orig.MessageID)
 			if err != nil {
 				return "", err

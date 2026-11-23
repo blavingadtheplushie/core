@@ -19,6 +19,7 @@ import (
 	"blavingad/internal/config"
 	"blavingad/internal/core"
 	"blavingad/internal/store"
+	"blavingad/internal/textutil"
 )
 
 type Manager struct {
@@ -287,8 +288,8 @@ func (m *Manager) Upgrade(ctx context.Context, rc *core.RunContext, summary stri
 	}
 	res.EvolutionID = store.NewID("evo")
 	m.st.DB.Exec(`INSERT INTO evolutions(id, kind, summary, details, commit_sha, status, run_id, created_at) VALUES(?,?,?,?,?,?,?,?)`,
-		res.EvolutionID, "code", summary, truncate(log, 20000), res.Commit, "staged", rc.RunID, store.Now())
-	pend := pending{EvolutionID: res.EvolutionID, Summary: summary, Commit: res.Commit, Channel: rc.Channel, ThreadTS: firstNonEmpty(rc.ThreadTS, rc.MessageTS)}
+		res.EvolutionID, "code", summary, textutil.Trunc(log, 20000), res.Commit, "staged", rc.RunID, store.Now())
+	pend := pending{EvolutionID: res.EvolutionID, Summary: summary, Commit: res.Commit, Channel: rc.Channel, ThreadTS: textutil.FirstNonEmpty(rc.ThreadTS, rc.MessageTS)}
 	b, _ := json.Marshal(pend)
 	os.WriteFile(filepath.Join(m.p.dir, "pending.json"), b, 0o644)
 	m.st.Audit(rc.Actor(), "self.upgrade", res.Commit, map[string]string{"summary": summary})
@@ -341,7 +342,7 @@ func (m *Manager) Update(ctx context.Context, opt UpdateOptions) (UpgradeResult,
 			logf("↪️  Not a fast-forward, rebasing local commits onto %s…", target)
 			if out, err := m.git(ctx, "rebase", target); err != nil {
 				m.git(ctx, "rebase", "--abort")
-				return res, fmt.Errorf("could not reconcile local commits with %s (conflict):\n%s", target, truncate(out, 2000))
+				return res, fmt.Errorf("could not reconcile local commits with %s (conflict):\n%s", target, textutil.Trunc(out, 2000))
 			}
 		}
 	}
@@ -382,7 +383,7 @@ func (m *Manager) Update(ctx context.Context, opt UpdateOptions) (UpgradeResult,
 			if out, err := m.git(ctx, "push", "origin", "HEAD:"+m.cfg.SelfRepoBranch); err == nil {
 				res.Pushed = true
 			} else {
-				logf("⚠️  Push failed (the update still applies): %s", truncate(out, 300))
+				logf("⚠️  Push failed (the update still applies): %s", textutil.Trunc(out, 300))
 			}
 		}
 	}
@@ -393,7 +394,7 @@ func (m *Manager) Update(ctx context.Context, opt UpdateOptions) (UpgradeResult,
 	os.WriteFile(m.builtSHAPath(), []byte(head), 0o644)
 	res.EvolutionID = store.NewID("evo")
 	m.st.DB.Exec(`INSERT INTO evolutions(id, kind, summary, details, commit_sha, status, created_at) VALUES(?,?,?,?,?,?,?)`,
-		res.EvolutionID, "update", summary+" by "+opt.Actor, truncate(log, 20000), res.Commit, "staged", store.Now())
+		res.EvolutionID, "update", summary+" by "+opt.Actor, textutil.Trunc(log, 20000), res.Commit, "staged", store.Now())
 	b, _ := json.Marshal(pending{EvolutionID: res.EvolutionID, Summary: summary + " by " + opt.Actor, Commit: res.Commit})
 	os.WriteFile(filepath.Join(m.p.dir, "pending.json"), b, 0o644)
 	m.st.Audit(opt.Actor, "self.update", res.Commit, map[string]any{"pull": opt.Pull})
@@ -481,7 +482,7 @@ func (m *Manager) AfterBoot(announce func(channel, thread string, n core.Notice)
 		if evo != "" {
 			m.st.DB.Exec(`UPDATE evolutions SET status = 'rolled_back', details = COALESCE(details,'') || ? WHERE id = ?`, "\n\n--- crash ---\n"+info.Log, evo)
 		}
-		lesson := fmt.Sprintf("A self-upgrade was rolled back automatically (%s). Log excerpt:\n%s", info.Reason, truncate(lastLines(info.Log, 25), 2500))
+		lesson := fmt.Sprintf("A self-upgrade was rolled back automatically (%s). Log excerpt:\n%s", info.Reason, textutil.Trunc(lastLines(info.Log, 25), 2500))
 		m.st.DB.Exec(`INSERT INTO memories(kind, subject, content, importance, source, created_at, updated_at) VALUES('lesson','self-upgrade rolled back',?,4,'supervisor',?,?)`, lesson, store.Now(), store.Now())
 		announce(channel, thread, core.Notice{Title: "Self-update", Task: "Crashed on startup · rolled back", Status: "error", Detail: info.Reason + "\nThe log is saved as a lesson in memory."})
 		return
@@ -502,26 +503,10 @@ func (m *Manager) AfterBoot(announce func(channel, thread string, n core.Notice)
 	}()
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
-}
-
 func lastLines(s string, n int) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	if len(lines) > n {
 		lines = lines[len(lines)-n:]
 	}
 	return strings.Join(lines, "\n")
-}
-
-func firstNonEmpty(v ...string) string {
-	for _, s := range v {
-		if s != "" {
-			return s
-		}
-	}
-	return ""
 }

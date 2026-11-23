@@ -11,6 +11,7 @@ import (
 	"github.com/slack-go/slack"
 
 	"blavingad/internal/core"
+	"blavingad/internal/textutil"
 )
 
 // Paul's Slack user token (xoxp) lives in the vault. Tools using it act AS
@@ -121,7 +122,7 @@ func registerSlackUser(d *Deps) {
 					ch = m.Channel.ID
 				}
 				fmt.Fprintf(&b, "[%s] #%s %s: %s  (channel=%s, ts=%s, link=%s)\n",
-					tsTime(m.Timestamp), ch, who, trunc(m.Text, 600), m.Channel.ID, m.Timestamp, m.Permalink)
+					tsTime(m.Timestamp), ch, who, textutil.Trunc(m.Text, 600), m.Channel.ID, m.Timestamp, m.Permalink)
 			}
 			return Clip(b.String(), 0), nil
 		},

@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"blavingad/internal/textutil"
 	"bufio"
 	"bytes"
 	"context"
@@ -50,7 +51,7 @@ func (c *Client) streamAnthropic(ctx context.Context, url string, body any, out 
 		if resp.StatusCode >= 400 {
 			data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
-			lastErr = fmt.Errorf("LLM HTTP %d: %s", resp.StatusCode, truncate(string(data), 800))
+			lastErr = fmt.Errorf("LLM HTTP %d: %s", resp.StatusCode, textutil.Trunc(string(data), 800))
 			if (resp.StatusCode == 429 && !permanent429(data)) || resp.StatusCode >= 500 {
 				continue
 			}
@@ -61,7 +62,7 @@ func (c *Client) streamAnthropic(ctx context.Context, url string, body any, out 
 			data, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 			resp.Body.Close()
 			if err := json.Unmarshal(data, out); err != nil {
-				return data, fmt.Errorf("unreadable LLM response: %w (%s)", err, truncate(string(data), 200))
+				return data, fmt.Errorf("unreadable LLM response: %w (%s)", err, textutil.Trunc(string(data), 200))
 			}
 			for _, b := range out.Content {
 				if b.Type == "text" && b.Text != "" {

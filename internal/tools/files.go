@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"blavingad/internal/core"
+	"blavingad/internal/textutil"
 )
 
 var safeCommands = map[string]bool{
@@ -80,7 +81,7 @@ func registerFiles(d *Deps) {
 				Command string            `json:"command"`
 				Secrets map[string]string `json:"secrets"`
 			}](args)
-			label := "$ " + short(a.Command, 90)
+			label := "$ " + textutil.Short(a.Command, 90)
 			if len(a.Secrets) > 0 {
 				var refs []string
 				for k, v := range a.Secrets {
@@ -352,7 +353,7 @@ func goGrep(root, pattern string) (string, error) {
 		}
 		for i, line := range strings.Split(string(data), "\n") {
 			if re.MatchString(line) {
-				hits = append(hits, fmt.Sprintf("%s:%d:%s", p, i+1, short(line, 300)))
+				hits = append(hits, fmt.Sprintf("%s:%d:%s", p, i+1, textutil.Short(line, 300)))
 			}
 		}
 		return nil

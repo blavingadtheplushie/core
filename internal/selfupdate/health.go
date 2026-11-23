@@ -1,6 +1,7 @@
 package selfupdate
 
 import (
+	"blavingad/internal/textutil"
 	"context"
 	"errors"
 	"fmt"
@@ -153,7 +154,7 @@ func (m *Manager) EnsureWritable(ctx context.Context) string {
 		if serr := m.EnsureSource(m.seedDir); serr != nil {
 			m.cfg.SourceDir = old
 			os.RemoveAll(fresh)
-			return m.writeProblem(dir, check, "copying it failed ("+truncate(out, 200)+") and so did a fresh checkout: "+serr.Error())
+			return m.writeProblem(dir, check, "copying it failed ("+textutil.Trunc(out, 200)+") and so did a fresh checkout: "+serr.Error())
 		}
 		m.cfg.SourceDir = old
 		how = "can't even read it, so I rebuilt a fresh source tree (from " + map[bool]string{true: "SELF_REPO", false: "the image"}[m.cfg.SelfRepo != "" && m.cfg.GitHubToken != ""] + ") in"

@@ -3,6 +3,7 @@
 package llm
 
 import (
+	"blavingad/internal/textutil"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -228,7 +229,7 @@ func (c *Client) Chat(ctx context.Context, req Request) (*Response, error) {
 	if reasoning == "" {
 		reasoning = ch.Message.Reasoning
 	}
-	return &Response{Message: msg, Reasoning: strings.TrimSpace(reasoning), FinishReason: ch.FinishReason, Usage: raw.Usage, Raw: truncate(string(data), 3000)}, nil
+	return &Response{Message: msg, Reasoning: strings.TrimSpace(reasoning), FinishReason: ch.FinishReason, Usage: raw.Usage, Raw: textutil.Trunc(string(data), 3000)}, nil
 }
 
 // decodeContent accepts both the classic string content and the newer
@@ -252,7 +253,7 @@ func decodeContent(raw json.RawMessage) string {
 			if p.Type == "thinking" || p.Type == "reasoning" {
 				continue
 			}
-			b.WriteString(firstNonEmpty(p.Text, p.Content))
+			b.WriteString(textutil.FirstNonEmpty(p.Text, p.Content))
 		}
 		return b.String()
 	}
@@ -327,7 +328,7 @@ func (c *Client) Models(ctx context.Context) ([]string, error) {
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, truncate(string(data), 300))
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, textutil.Trunc(string(data), 300))
 	}
 	var raw struct {
 		Data []struct {
@@ -384,14 +385,14 @@ func (c *Client) post(ctx context.Context, url, style string, body any, out any)
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 		resp.Body.Close()
 		if (resp.StatusCode == 429 && !permanent429(data)) || resp.StatusCode >= 500 {
-			lastErr = fmt.Errorf("LLM HTTP %d: %s", resp.StatusCode, truncate(string(data), 400))
+			lastErr = fmt.Errorf("LLM HTTP %d: %s", resp.StatusCode, textutil.Trunc(string(data), 400))
 			continue
 		}
 		if resp.StatusCode >= 400 {
-			return data, fmt.Errorf("LLM HTTP %d: %s", resp.StatusCode, truncate(string(data), 800))
+			return data, fmt.Errorf("LLM HTTP %d: %s", resp.StatusCode, textutil.Trunc(string(data), 800))
 		}
 		if err := json.Unmarshal(data, out); err != nil {
-			return data, fmt.Errorf("unreadable LLM response: %w (%s)", err, truncate(string(data), 200))
+			return data, fmt.Errorf("unreadable LLM response: %w (%s)", err, textutil.Trunc(string(data), 200))
 		}
 		return data, nil
 	}
@@ -413,13 +414,6 @@ func normalize(v []float32) []float32 {
 	return v
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
-}
-
 // EstimateTokens is a cheap heuristic (≈ 3.5 chars per token) used for
 // context budgeting when the server does not tell us better.
 func EstimateTokens(msgs []Message) int {
@@ -434,15 +428,6 @@ func EstimateTokens(msgs []Message) int {
 }
 
 func F(v float64) *float64 { return &v }
-
-func firstNonEmpty(v ...string) string {
-	for _, s := range v {
-		if s != "" {
-			return s
-		}
-	}
-	return ""
-}
 
 // openAIMessages adapts images for the OpenAI shape: tool messages can't
 // carry images, so they move to a user turn right after the tool results.

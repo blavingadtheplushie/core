@@ -8,6 +8,7 @@ import (
 	"github.com/slack-go/slack"
 
 	"blavingad/internal/core"
+	"blavingad/internal/textutil"
 )
 
 // planTask builds one task card of a plan block.
@@ -15,18 +16,18 @@ func planTask(id, title, status, details, output string, preDetails, preOutput b
 	if status == "" {
 		status = "complete"
 	}
-	t := map[string]any{"task_id": id, "title": clipRunes(title, 140), "status": status}
+	t := map[string]any{"task_id": id, "title": textutil.Clip(title, 140), "status": status}
 	if d := strings.TrimSpace(details); d != "" {
-		t["details"] = richText(clipRunes(d, 1500), preDetails)
+		t["details"] = richText(textutil.Clip(d, 1500), preDetails)
 	}
 	if o := strings.TrimSpace(output); o != "" {
-		t["output"] = richText(clipRunes(o, 1200), preOutput)
+		t["output"] = richText(textutil.Clip(o, 1200), preOutput)
 	}
 	return t
 }
 
 func planOf(title string, tasks ...any) slack.Block {
-	return rawBlock{kind: "plan", body: map[string]any{"title": clipRunes(title, 140), "tasks": tasks}}
+	return rawBlock{kind: "plan", body: map[string]any{"title": textutil.Clip(title, 140), "tasks": tasks}}
 }
 
 // noticeBlocks renders a system message in the same layout as answers.
@@ -44,7 +45,7 @@ func noticeBlocks(n core.Notice, plan bool) []slack.Block {
 			line += " · " + escape(task)
 		}
 		if d := strings.TrimSpace(n.Detail); d != "" {
-			line += "\n" + escape(clipRunes(d, 1200))
+			line += "\n" + escape(textutil.Clip(d, 1200))
 		}
 		blocks = append(blocks, contextLine(line))
 	}
@@ -62,7 +63,7 @@ func noticeText(n core.Notice) string {
 	if n.Task != "" && n.Task != n.Title {
 		t += " · " + n.Task
 	}
-	return short(t, 300)
+	return textutil.Short(t, 300)
 }
 
 // ephemeralNotice shows a notice to one person only, with the plan layout

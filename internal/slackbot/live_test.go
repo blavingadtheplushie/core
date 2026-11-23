@@ -1,6 +1,7 @@
 package slackbot
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -86,7 +87,7 @@ func newTestLive() *liveMessage {
 
 func TestTimelinePlan(t *testing.T) {
 	l := newTestLive()
-	_, plans := encode(t, l.workingBlocks(true))
+	_, plans := encode(t, []slack.Block{l.planBlock("Working on it…")})
 	if len(plans) != 1 || plans[0].Tasks[0].Status != "in_progress" {
 		t.Fatalf("initial plan: %+v", plans)
 	}
@@ -103,7 +104,7 @@ func TestTimelinePlan(t *testing.T) {
 	l.progress(agent.Progress{Kind: "thought", Text: "Now I can answer."})
 	l.progress(agent.Progress{Kind: "tool_start", Tool: "shell", Category: "code", Emoji: "🐚", Label: "$ go version"})
 
-	js, plans := encode(t, l.workingBlocks(true))
+	js, plans := encode(t, []slack.Block{l.planBlock("Working on it…")})
 	p := plans[0]
 	if p.BlockID != firstID {
 		t.Errorf("block_id must stay stable across updates: first %q, now %q", firstID, p.BlockID)
@@ -120,7 +121,7 @@ func TestTimelinePlan(t *testing.T) {
 	if strings.Join(statuses, ",") != "complete,complete,complete,complete,error,complete,in_progress" {
 		t.Errorf("statuses: %v", statuses)
 	}
-	for _, want := range []string{"step 2", `{\"query\":\"go release\"}`, "Go 1.27 released", "I'll search", "Not allowed for your access profile (👋 Guest)", "rich_text_preformatted"} {
+	for _, want := range []string{`{\"query\":\"go release\"}`, "Go 1.27 released", "I'll search", "Not allowed for your access profile (👋 Guest)", "rich_text_preformatted"} {
 		if !strings.Contains(js, want) {
 			t.Errorf("working plan misses %q", want)
 		}
@@ -129,29 +130,24 @@ func TestTimelinePlan(t *testing.T) {
 		t.Error("memory results must not be shown in Slack")
 	}
 
-	// Final: plan first (with the reflection task), then the answer, nothing else.
-	res := agent.Result{RunID: "run_1", Status: "done", ToolCalls: 4, Reflecting: true, Output: "Go 1.27 is out 🎉"}
-	blocks := l.finalBlocks(res, []string{"*Go 1.27* is out 🎉"}, reflectionEvent(true, false, nil), true)
+	// Final: plan first, then the answer, nothing else.
+	res := agent.Result{RunID: "run_1", Status: "done", ToolCalls: 4, Output: "Go 1.27 is out 🎉"}
+	blocks := l.finalBlocks(res, []string{"*Go 1.27* is out 🎉"}, true)
 	js, plans = encode(t, blocks)
 	if _, ok := blocks[0].(rawBlock); !ok || len(blocks) != 2 {
 		t.Fatalf("final layout must be [plan, answer]: %s", js)
 	}
-	last := plans[0].Tasks[len(plans[0].Tasks)-1]
-	if !strings.Contains(plans[0].Title, "2 thoughts") || !strings.Contains(plans[0].Title, "4 tool calls") || last.Title != "💭 Reflection" || last.Status != "in_progress" {
-		t.Errorf("final plan: title %q, last task %+v", plans[0].Title, last)
+	if !strings.Contains(plans[0].Title, "2 thoughts") || !strings.Contains(plans[0].Title, "4 tool calls") {
+		t.Errorf("final plan title %q", plans[0].Title)
 	}
-	for _, banned := range []string{"Remembered", "⏱", "tokens", "gpt", "feedback"} {
+	for _, banned := range []string{"Reflection", "⏱", "tokens", "gpt", "feedback"} {
 		if strings.Contains(js, banned) {
 			t.Errorf("final layout must not show %q", banned)
 		}
 	}
-	done := reflectionEvent(true, true, []string{"+ #1 [fact] Go 1.27 is out", "👤 <@U1>: likes Go"})
-	js, _ = encode(t, l.finalBlocks(res, []string{"answer"}, done, true))
-	if !strings.Contains(js, "Remembered 2 things") || !strings.Contains(js, `"status":"complete"`) {
-		t.Errorf("reflection result must land in the plan: %s", js)
-	}
-	if js, _ := encode(t, l.finalBlocks(res, []string{"a"}, reflectionEvent(true, true, nil), true)); !strings.Contains(js, "Nothing new worth remembering") {
-		t.Error("empty reflection")
+	// No plan blocks allowed: text only.
+	if bl := l.finalBlocks(res, []string{"a"}, false); len(bl) != 1 {
+		t.Errorf("no-plan layout: %d blocks", len(bl))
 	}
 }
 
@@ -160,35 +156,25 @@ func TestPlanFoldsAt50(t *testing.T) {
 	for i := 0; i < 70; i++ {
 		l.progress(agent.Progress{Kind: "thought", Text: "step"})
 	}
-	_, plans := encode(t, l.finalBlocks(agent.Result{Status: "done"}, []string{"ok"}, reflectionEvent(true, false, nil), true))
-	if n := len(plans[0].Tasks); n != 50 || !strings.Contains(plans[0].Tasks[0].Title, "22 earlier steps") {
+	_, plans := encode(t, l.finalBlocks(agent.Result{Status: "done"}, []string{"ok"}, true))
+	if n := len(plans[0].Tasks); n != 50 || !strings.Contains(plans[0].Tasks[0].Title, "21 earlier steps") {
 		t.Errorf("tasks = %d, first = %q", n, plans[0].Tasks[0].Title)
 	}
 }
 
-func TestBareAnswerAndLegacy(t *testing.T) {
+func TestBareAnswer(t *testing.T) {
 	l := newTestLive()
-	blocks := l.finalBlocks(agent.Result{Status: "done"}, []string{"Hi! 👋"}, nil, true)
-	if len(blocks) != 1 {
+	if blocks := l.finalBlocks(agent.Result{Status: "done"}, []string{"Hi! 👋"}, true); len(blocks) != 1 {
 		t.Errorf("a plain answer needs no plan: %d blocks", len(blocks))
-	}
-	l.progress(agent.Progress{Kind: "tool_start", Tool: "shell", Emoji: "🐚", Label: "$ ls"})
-	js, plans := encode(t, l.workingBlocks(false))
-	if len(plans) != 0 || !strings.Contains(js, "$ ls") {
-		t.Errorf("legacy working layout: %s", js)
-	}
-	js, plans = encode(t, l.finalBlocks(agent.Result{Status: "error"}, []string{"😵 Oops"}, nil, false))
-	if len(plans) != 0 || !strings.Contains(js, "Something went wrong") || !strings.Contains(js, "1 tool call") {
-		t.Errorf("legacy final layout: %s", js)
 	}
 }
 
 func TestStreamMarkdown(t *testing.T) {
 	cases := map[string]string{
-		"*bold* and _it_":         "**bold** and _it_",
-		"`a*b` *x*":               "`a*b` **x**",
-		"```\n*no*\n``` *yes*":    "```\n*no*\n``` **yes**",
-		"**already**":             "**already**",
+		"*bold* and _it_":          "**bold** and _it_",
+		"`a*b` *x*":                "`a*b` **x**",
+		"```\n*no*\n``` *yes*":     "```\n*no*\n``` **yes**",
+		"**already**":              "**already**",
 		"<https://x.y|link> :yay:": "<https://x.y|link> :yay:",
 	}
 	for in, want := range cases {
@@ -204,8 +190,6 @@ func TestStreamMarkdown(t *testing.T) {
 }
 
 func TestNativeChunksDelta(t *testing.T) {
-	streamAnswerText = true
-	defer func() { streamAnswerText = true }()
 	l := newTestLive()
 	l.sent = map[int]string{}
 	l.progress(agent.Progress{Kind: "thinking", Iteration: 1})
@@ -233,8 +217,6 @@ func TestNativeChunksDelta(t *testing.T) {
 // Narration written before a tool call must not leak into the streamed
 // answer: it goes to the plan as a Thinking card instead.
 func TestNativeNarrationGoesToPlan(t *testing.T) {
-	streamAnswerText = true
-	defer func() { streamAnswerText = true }()
 	l := newTestLive()
 	l.sent = map[int]string{}
 	l.progress(agent.Progress{Kind: "thinking", Iteration: 1})
@@ -277,4 +259,19 @@ func TestNativeFinishModesPrefix(t *testing.T) {
 	if !l.earlierText {
 		t.Fatalf("text of an earlier turn must be tracked")
 	}
+}
+
+// When Slack drops the stream, nothing is edited live and finish() must
+// repost if text was already streamed (it can't be removed by chat.update).
+func TestNativeDroppedStream(t *testing.T) {
+	l := newTestLive()
+	l.native, l.closed, l.sent = true, true, map[int]string{}
+	if m := l.finishNative(context.Background(), "answer", true); m != nativeUpdate {
+		t.Errorf("no text streamed: want update, got %d", m)
+	}
+	l.streamed = "partial"
+	if m := l.finishNative(context.Background(), "answer", true); m != nativeRepost {
+		t.Errorf("text streamed: want repost, got %d", m)
+	}
+	l.flushNative(context.Background()) // closed: must not call Slack (nil API would panic)
 }

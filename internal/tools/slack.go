@@ -15,6 +15,7 @@ import (
 
 	"blavingad/internal/core"
 	"blavingad/internal/store"
+	"blavingad/internal/textutil"
 )
 
 func (d *Deps) slackOK() bool { return d.Slack != nil }
@@ -237,7 +238,7 @@ func registerSlack(d *Deps) {
 			for rows.Next() {
 				var ch, chName, ts, thread, who, text string
 				rows.Scan(&ch, &chName, &ts, &thread, &who, &text)
-				fmt.Fprintf(&b, "[%s] #%s %s: %s  (channel=%s ts=%s", tsTime(ts), chName, who, short(text, 500), ch, ts)
+				fmt.Fprintf(&b, "[%s] #%s %s: %s  (channel=%s ts=%s", tsTime(ts), chName, who, textutil.Short(text, 500), ch, ts)
 				if thread != "" && thread != ts {
 					fmt.Fprintf(&b, " thread=%s", thread)
 				}
@@ -386,7 +387,7 @@ func registerSlack(d *Deps) {
 					if c.IsMember {
 						member = " ✅ member"
 					}
-					fmt.Fprintf(&b, "#%s (%s) — %d members%s — %s\n", c.Name, c.ID, c.NumMembers, member, short(c.Topic.Value, 80))
+					fmt.Fprintf(&b, "#%s (%s) — %d members%s — %s\n", c.Name, c.ID, c.NumMembers, member, textutil.Short(c.Topic.Value, 80))
 				}
 				if next == "" {
 					break
@@ -486,7 +487,7 @@ func registerSlack(d *Deps) {
 			if a.Channel == "" {
 				a.Channel = rc.Channel
 				if a.ThreadTS == "" {
-					a.ThreadTS = firstNonEmpty(rc.ThreadTS, rc.MessageTS)
+					a.ThreadTS = textutil.FirstNonEmpty(rc.ThreadTS, rc.MessageTS)
 				}
 			}
 			ch, err := d.resolveChannel(ctx, a.Channel)
@@ -504,15 +505,6 @@ func registerSlack(d *Deps) {
 			return "File uploaded: " + name, nil
 		},
 	})
-}
-
-func firstNonEmpty(v ...string) string {
-	for _, s := range v {
-		if s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 // dmError turns Slack's cryptic cannot_dm_bot into an actionable hint.

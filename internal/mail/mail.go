@@ -59,8 +59,6 @@ func New(cfg *config.Config, st *store.Store, bus *core.Bus) *Service {
 	return &Service{cfg: cfg, st: st, bus: bus}
 }
 
-func (s *Service) Address() string { return s.cfg.EmailFrom }
-
 // ---------- outbound ----------
 
 // Attachment is a file attached to an outgoing email.

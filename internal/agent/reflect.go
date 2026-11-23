@@ -12,6 +12,7 @@ import (
 	"blavingad/internal/llm"
 	"blavingad/internal/memory"
 	"blavingad/internal/store"
+	"blavingad/internal/textutil"
 )
 
 const reflectPrompt = `You are the memory module of an AI agent named %s. Analyze the exchange below and extract ONLY what deserves to be remembered for the long run (still useful weeks from now):
@@ -191,19 +192,19 @@ func (r *Runner) SelfReview(ctx context.Context) Result {
 	if rows, err := r.st.Rows(`SELECT id, input, error FROM runs WHERE started_at > ? AND status = 'error' LIMIT 10`, since); err == nil && len(rows) > 0 {
 		b.WriteString("### Failed runs\n")
 		for _, x := range rows {
-			fmt.Fprintf(&b, "- %v « %v » → %v\n", x["id"], short(fmt.Sprint(x["input"]), 120), short(fmt.Sprint(x["error"]), 200))
+			fmt.Fprintf(&b, "- %v « %v » → %v\n", x["id"], textutil.Short(fmt.Sprint(x["input"]), 120), textutil.Short(fmt.Sprint(x["error"]), 200))
 		}
 	}
 	if rows, err := r.st.Rows(`SELECT id, input, output FROM runs WHERE started_at > ? AND feedback < 0 LIMIT 10`, since); err == nil && len(rows) > 0 {
 		b.WriteString("\n### Answers rated 👎\n")
 		for _, x := range rows {
-			fmt.Fprintf(&b, "- %v Q: %v\n  R: %v\n", x["id"], short(fmt.Sprint(x["input"]), 150), short(fmt.Sprint(x["output"]), 250))
+			fmt.Fprintf(&b, "- %v Q: %v\n  R: %v\n", x["id"], textutil.Short(fmt.Sprint(x["input"]), 150), textutil.Short(fmt.Sprint(x["output"]), 250))
 		}
 	}
 	if rows, err := r.st.Rows(`SELECT name, COUNT(*) AS n, MAX(substr(output,1,200)) AS sample FROM run_steps WHERE kind = 'tool' AND status = 'error' AND created_at > ? GROUP BY name ORDER BY n DESC LIMIT 10`, since); err == nil && len(rows) > 0 {
 		b.WriteString("\n### Failing tools\n")
 		for _, x := range rows {
-			fmt.Fprintf(&b, "- %v ×%v : %v\n", x["name"], x["n"], short(fmt.Sprint(x["sample"]), 180))
+			fmt.Fprintf(&b, "- %v ×%v : %v\n", x["name"], x["n"], textutil.Short(fmt.Sprint(x["sample"]), 180))
 		}
 	}
 	if rows, err := r.st.Rows(`SELECT tool, summary FROM approvals WHERE created_at > ? AND status = 'denied' LIMIT 10`, since); err == nil && len(rows) > 0 {

@@ -125,13 +125,13 @@ type ApprovalNotifier interface {
 var ErrDenied = errors.New("action denied by a human")
 
 type Approvals struct {
-	st       *store.Store
-	bus      *Bus
-	reg      *Registry
-	mu       sync.Mutex
-	waiters  map[string]chan string
+	st        *store.Store
+	bus       *Bus
+	reg       *Registry
+	mu        sync.Mutex
+	waiters   map[string]chan string
 	notifiers []ApprovalNotifier
-	Timeout  time.Duration
+	Timeout   time.Duration
 }
 
 func NewApprovals(st *store.Store, bus *Bus, reg *Registry) *Approvals {

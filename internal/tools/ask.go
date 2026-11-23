@@ -15,7 +15,7 @@ var reAskName = regexp.MustCompile(`^[A-Za-z0-9 _.\-]{1,80}$`)
 
 func (d *Deps) askReady(rc *core.RunContext) error {
 	if d.Ask == nil {
-		return errors.New("Slack is not connected: forms are unavailable")
+		return errors.New("slack is not connected: forms are unavailable")
 	}
 	if rc.UserID == "" || !strings.HasPrefix(rc.UserID, "U") {
 		return errors.New("no Slack user behind this run to ask (forms need a Slack user; Signal/email/web runs without a linked Slack user can't use them)")
@@ -28,7 +28,7 @@ func registerAsk(d *Deps) {
 
 	d.Reg.Add(&core.Tool{
 		Name: "ask_secret", Category: "vault", Emoji: "🔑", Risk: core.RiskSafe,
-		Available: func() bool { return slackOK() && d.vaultReady() },
+		Available:   func() bool { return slackOK() && d.vaultReady() },
 		Description: "Asks the person talking to you for a secret (API key, token, password) through a Slack form: a 'Fill in' button opens a modal, and the value goes STRAIGHT into Vaultwarden as vault://<name>/password. You never see it. Blocks until answered (max 15 min). Use it whenever a task needs a credential you don't have, instead of asking for it in chat. Then use the reference normally.",
 		Params: core.Obj(map[string]any{
 			"name":  core.Str("Vault item name to store it as, e.g. LASTFM_API_KEY."),

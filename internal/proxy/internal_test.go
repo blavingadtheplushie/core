@@ -43,7 +43,7 @@ func TestInternalKey(t *testing.T) {
 	if c := call("sk-blv-int-nope"); c != 401 {
 		t.Fatalf("bad internal key: %d", c)
 	}
-	if p.InternalKey() != p.InternalKey() {
+	if k1 := p.InternalKey(); k1 == "" || p.InternalKey() != k1 {
 		t.Fatal("internal key not stable")
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"blavingad/internal/cloudflare"
 	"blavingad/internal/core"
 	"blavingad/internal/memory"
+	"blavingad/internal/textutil"
 )
 
 const operatingRules = `## How you work
@@ -98,7 +99,7 @@ func (r *Runner) environment(rc *core.RunContext) string {
 		if strings.HasPrefix(rc.Channel, "D") {
 			where = "direct message"
 		}
-		fmt.Fprintf(&b, "- Conversation: Slack, %s (channel=%s, thread=%s)\n", where, rc.Channel, firstNonEmpty(rc.ThreadTS, rc.MessageTS))
+		fmt.Fprintf(&b, "- Conversation: Slack, %s (channel=%s, thread=%s)\n", where, rc.Channel, textutil.FirstNonEmpty(rc.ThreadTS, rc.MessageTS))
 	case "signal":
 		fmt.Fprintf(&b, "- Conversation: Signal (%s, %s). Your answer is sent there as a Signal message: plain text, no Slack mrkdwn\n", rc.ChannelName, rc.Channel)
 	case "discord":
@@ -158,7 +159,7 @@ func (r *Runner) recall(ctx context.Context, rc *core.RunContext, query string) 
 	}
 	if rc.UserID != "" {
 		if p, ok := r.mem.GetPerson(rc.UserID); ok {
-			fmt.Fprintf(&b, "## What you know about %s\n", firstNonEmpty(p.RealName, p.Name, rc.UserName))
+			fmt.Fprintf(&b, "## What you know about %s\n", textutil.FirstNonEmpty(p.RealName, p.Name, rc.UserName))
 			if p.Title != "" {
 				fmt.Fprintf(&b, "- Title: %s\n", p.Title)
 			}
@@ -203,15 +204,6 @@ type promptPart struct {
 	Text string
 }
 
-func (r *Runner) systemPrompt(ctx context.Context, rc *core.RunContext, query string, extra string, s Settings) (string, []memory.Memory) {
-	parts, mems := r.systemParts(ctx, rc, query, extra, s)
-	texts := make([]string, len(parts))
-	for i, p := range parts {
-		texts[i] = p.Text
-	}
-	return strings.Join(texts, "\n\n"), mems
-}
-
 func (r *Runner) systemParts(ctx context.Context, rc *core.RunContext, query string, extra string, s Settings) ([]promptPart, []memory.Memory) {
 	rules := strings.NewReplacer("{{LANG}}", r.cfg.Language, "{{SRC}}", r.cfg.SourceDir).Replace(operatingRules)
 	recall, mems := r.recall(ctx, rc, query)
@@ -219,9 +211,7 @@ func (r *Runner) systemParts(ctx context.Context, rc *core.RunContext, query str
 	if sk := r.skillsIndex(); sk != "" {
 		parts = append(parts, promptPart{"skills index", sk})
 	}
-	for _, rp := range recall {
-		parts = append(parts, rp)
-	}
+	parts = append(parts, recall...)
 	if strings.TrimSpace(s.ExtraPrompt) != "" {
 		parts = append(parts, promptPart{"admin instructions", "## Admin instructions\n" + s.ExtraPrompt})
 	}
@@ -241,15 +231,6 @@ func (r *Runner) systemParts(ctx context.Context, rc *core.RunContext, query str
 		parts = append(parts, promptPart{"extra (request)", extra})
 	}
 	return parts, mems
-}
-
-func firstNonEmpty(v ...string) string {
-	for _, s := range v {
-		if s != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 var system = sync.OnceValue(func() string {

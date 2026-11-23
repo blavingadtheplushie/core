@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"blavingad/internal/core"
+	"blavingad/internal/textutil"
 )
 
 func (d *Deps) gh(ctx context.Context, method, path string, body any) (int, []byte, error) {
@@ -104,9 +105,9 @@ func registerGitHub(d *Deps) {
 		}, "method", "path"),
 		NeedsApproval: func(args json.RawMessage) bool { return strings.ToUpper(field(args, "method")) != "GET" },
 		Summarize: func(args json.RawMessage) string {
-			s := "GitHub " + strings.ToUpper(field(args, "method")) + " " + short(field(args, "path"), 70)
+			s := "GitHub " + strings.ToUpper(field(args, "method")) + " " + textutil.Short(field(args, "path"), 70)
 			if b := strings.Join(strings.Fields(field(args, "body")), " "); b != "" {
-				s += " · " + short(b, 120)
+				s += " · " + textutil.Short(b, 120)
 			}
 			return s
 		},
@@ -135,7 +136,7 @@ func registerGitHub(d *Deps) {
 				return "", err
 			}
 			if status >= 400 {
-				return "", fmt.Errorf("GitHub HTTP %d: %s", status, short(string(data), 300))
+				return "", fmt.Errorf("GitHub HTTP %d: %s", status, textutil.Short(string(data), 300))
 			}
 			var res struct {
 				TotalCount int              `json:"total_count"`
@@ -147,7 +148,7 @@ func registerGitHub(d *Deps) {
 			for _, it := range res.Items {
 				switch a.Type {
 				case "repositories":
-					fmt.Fprintf(&b, "- %v ⭐%v — %v\n  %v\n", it["full_name"], it["stargazers_count"], short(fmt.Sprint(it["description"]), 140), it["html_url"])
+					fmt.Fprintf(&b, "- %v ⭐%v — %v\n  %v\n", it["full_name"], it["stargazers_count"], textutil.Short(fmt.Sprint(it["description"]), 140), it["html_url"])
 				case "code":
 					repo, _ := it["repository"].(map[string]any)
 					fmt.Fprintf(&b, "- %v: %v\n  %v\n", repo["full_name"], it["path"], it["html_url"])
@@ -184,7 +185,7 @@ func registerGitHub(d *Deps) {
 				return "", err
 			}
 			if status >= 400 {
-				return "", fmt.Errorf("GitHub HTTP %d: %s", status, short(string(data), 400))
+				return "", fmt.Errorf("GitHub HTTP %d: %s", status, textutil.Short(string(data), 400))
 			}
 			var repo map[string]any
 			json.Unmarshal(data, &repo)

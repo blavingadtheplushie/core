@@ -20,6 +20,7 @@ import (
 	"blavingad/internal/llm"
 	"blavingad/internal/memory"
 	"blavingad/internal/store"
+	"blavingad/internal/textutil"
 )
 
 type Runner struct {
@@ -224,7 +225,7 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	r.mu.Lock()
-	r.active[res.RunID] = &activeRun{cancel: cancel, channel: req.Channel, threadTS: firstNonEmpty(req.ThreadTS, req.MessageTS)}
+	r.active[res.RunID] = &activeRun{cancel: cancel, channel: req.Channel, threadTS: textutil.FirstNonEmpty(req.ThreadTS, req.MessageTS)}
 	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
@@ -235,7 +236,7 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 	r.st.DB.Exec(`INSERT INTO runs(id, parent_id, source, channel, channel_name, thread_ts, message_ts, user_id, user_name, input, status, model, started_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, res.RunID, nullable(req.ParentID), req.Source, req.Channel, req.ChannelName, req.ThreadTS, req.MessageTS,
 		req.UserID, req.UserName, req.Text, "running", s.Model, store.Now())
-	r.bus.Publish("run.started", map[string]any{"id": res.RunID, "source": req.Source, "user": req.UserName, "input": short(req.Text, 200), "parent_id": req.ParentID})
+	r.bus.Publish("run.started", map[string]any{"id": res.RunID, "source": req.Source, "user": req.UserName, "input": textutil.Short(req.Text, 200), "parent_id": req.ParentID})
 	if req.OnStart != nil {
 		req.OnStart(res.RunID)
 	}
@@ -273,14 +274,14 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 			status = "error"
 			errText = runErr.Error()
 			if res.Output == "" {
-				res.Output = "😵 Oops, I hit an error: " + short(errText, 400)
+				res.Output = "😵 Oops, I hit an error: " + textutil.Short(errText, 400)
 			}
 		}
 		res.Status = status
 		res.Output = core.Secrets.Redact(res.Output)
 		r.st.DB.Exec(`UPDATE runs SET output = ?, status = ?, error = ?, tool_calls = ?, prompt_tokens = ?, completion_tokens = ?, cache_read_tokens = ?, cache_write_tokens = ?, finished_at = ? WHERE id = ?`,
 			res.Output, status, nullable(errText), res.ToolCalls, res.Usage.PromptTokens, res.Usage.CompletionTokens, res.Usage.CacheReadTokens, res.Usage.CacheWriteTokens, store.Now(), res.RunID)
-		r.bus.Publish("run.finished", map[string]any{"id": res.RunID, "status": status, "output": short(res.Output, 300), "tool_calls": res.ToolCalls})
+		r.bus.Publish("run.finished", map[string]any{"id": res.RunID, "status": status, "output": textutil.Short(res.Output, 300), "tool_calls": res.ToolCalls})
 	}()
 
 	if !r.cfg.LLMConfigured() {
@@ -371,11 +372,11 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 		progress(Progress{Kind: "thinking", Iteration: iter})
 		start := time.Now()
 		creq := llm.Request{Model: s.Model, Messages: msgs, Tools: defs, Temperature: &temp, MaxTokens: max(r.cfg.LLMMaxTokens, boost)}
-		if s.StreamReplies && req.Depth == 0 && req.OnProgress != nil {
+		if req.Depth == 0 && req.OnProgress != nil {
 			creq.OnText = draftStreamer(func(text string) { req.OnProgress(Progress{Kind: "draft", Text: text, Iteration: iter}) })
 		}
 		resp, err := r.llm.Chat(ctx, creq)
-		if s.StreamReplies && req.OnProgress != nil && req.Depth == 0 {
+		if req.Depth == 0 && req.OnProgress != nil {
 			req.OnProgress(Progress{Kind: "draft", Text: "", Iteration: iter}) // the turn is over: drop the draft
 		}
 		if err != nil {
@@ -409,7 +410,7 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 				partial += text
 			}
 			if strings.TrimSpace(text) != "" || len(resp.Message.ToolCalls) > 0 {
-				msgs = append(msgs, llm.Message{Role: "assistant", Content: firstNonEmpty(strings.TrimSpace(text), "…")})
+				msgs = append(msgs, llm.Message{Role: "assistant", Content: textutil.FirstNonEmpty(strings.TrimSpace(text), "…")})
 			}
 			msgs = append(msgs, llm.Message{Role: "user", Content: nudge})
 			iter--
@@ -425,7 +426,7 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 		msgs = append(msgs, resp.Message)
 		// Surface the model's thinking: native reasoning when the provider
 		// exposes it, otherwise the narration it writes next to tool calls.
-		if thought := firstNonEmpty(resp.Reasoning, map[bool]string{true: resp.Message.Content}[len(resp.Message.ToolCalls) > 0]); thought != "" {
+		if thought := textutil.FirstNonEmpty(resp.Reasoning, map[bool]string{true: resp.Message.Content}[len(resp.Message.ToolCalls) > 0]); thought != "" {
 			thought = core.Secrets.Redact(thought)
 			r.step(res.RunID, "thought", "thinking", "", thought, "ok", 0, 0)
 			progress(Progress{Kind: "thought", Text: thought, Iteration: iter})
@@ -480,7 +481,7 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 // bigger budget if it ran out — before falling back to its reasoning or its
 // last narration.
 func (r *Runner) recoverEmpty(ctx context.Context, runID string, s Settings, history []llm.Message, empty *llm.Response, narration string, usage *llm.Usage) string {
-	finish := firstNonEmpty(empty.FinishReason, "unknown")
+	finish := textutil.FirstNonEmpty(empty.FinishReason, "unknown")
 	diag := fmt.Sprintf("finish_reason=%s · reasoning=%d chars · completion_tokens=%d\n\nraw response:\n%s",
 		finish, len(empty.Reasoning), empty.Usage.CompletionTokens, empty.Raw)
 	r.step(runID, "llm", "empty reply", "", diag, "error", 0, 0)
@@ -677,7 +678,7 @@ func (r *Runner) registerDelegate() {
 		Summarize: func(args json.RawMessage) string {
 			var a struct{ Task string }
 			json.Unmarshal(args, &a)
-			return "Sub-agent: " + short(a.Task, 70)
+			return "Sub-agent: " + textutil.Short(a.Task, 70)
 		},
 		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
 			a, err := core.Parse[struct {
@@ -742,14 +743,6 @@ func nullable(s string) any {
 		return nil
 	}
 	return s
-}
-
-func short(s string, n int) string {
-	s = strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
-	if len([]rune(s)) <= n {
-		return s
-	}
-	return string([]rune(s)[:n]) + "…"
 }
 
 func clip(s string, max int) string {

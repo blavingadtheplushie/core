@@ -13,6 +13,7 @@ import (
 
 	"blavingad/internal/core"
 	"blavingad/internal/mail"
+	"blavingad/internal/textutil"
 )
 
 var httpClient = &http.Client{Timeout: 60 * time.Second}
@@ -43,7 +44,7 @@ func (d *Deps) exa(ctx context.Context, path string, body any) (map[string]any, 
 		}
 	}
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("Exa HTTP %d: %s", resp.StatusCode, short(string(data), 300))
+		return nil, fmt.Errorf("exa HTTP %d: %s", resp.StatusCode, textutil.Short(string(data), 300))
 	}
 	var out map[string]any
 	return out, json.Unmarshal(data, &out)
@@ -63,11 +64,11 @@ func formatExaResults(res map[string]any, maxText int) string {
 		}
 		if hl, ok := m["highlights"].([]any); ok && len(hl) > 0 {
 			for _, h := range hl {
-				fmt.Fprintf(&b, "    » %s\n", short(fmt.Sprint(h), 400))
+				fmt.Fprintf(&b, "    » %s\n", textutil.Short(fmt.Sprint(h), 400))
 			}
 		}
 		if t, ok := m["text"].(string); ok && t != "" {
-			fmt.Fprintf(&b, "    %s\n", strings.ReplaceAll(short(t, maxText), "\n", " "))
+			fmt.Fprintf(&b, "    %s\n", strings.ReplaceAll(textutil.Short(t, maxText), "\n", " "))
 		}
 		if s, ok := m["summary"].(string); ok && s != "" {
 			fmt.Fprintf(&b, "    summary: %s\n", s)
@@ -157,7 +158,7 @@ func registerWeb(d *Deps) {
 		Summarize: func(args json.RawMessage) string {
 			a, _ := core.Parse[struct{ Urls []string }](args)
 			if len(a.Urls) > 0 {
-				return "Reading " + short(a.Urls[0], 70)
+				return "Reading " + textutil.Short(a.Urls[0], 70)
 			}
 			return ""
 		},
@@ -223,7 +224,7 @@ func registerWeb(d *Deps) {
 			return m != "GET" && m != "HEAD" && m != ""
 		},
 		Summarize: func(args json.RawMessage) string {
-			return strings.ToUpper(field(args, "method")) + " " + short(field(args, "url"), 80)
+			return strings.ToUpper(field(args, "method")) + " " + textutil.Short(field(args, "url"), 80)
 		},
 		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
 			a, err := core.Parse[struct {

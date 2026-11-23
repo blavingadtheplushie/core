@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"blavingad/internal/textutil"
 	"context"
 	"encoding/json"
 	"errors"
@@ -224,5 +225,5 @@ func (c *Client) chatAnthropic(ctx context.Context, base string, req Request) (*
 		finish = "tool_calls"
 	}
 	return &Response{Message: msg, Reasoning: strings.TrimSpace(strings.Join(thinking, "\n")), FinishReason: finish,
-		Usage: raw.Usage.usage(), Raw: truncate(string(data), 3000)}, nil
+		Usage: raw.Usage.usage(), Raw: textutil.Trunc(string(data), 3000)}, nil
 }

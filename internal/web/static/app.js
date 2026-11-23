@@ -1400,13 +1400,14 @@ async function renderMCP() {
 }
 
 function mcpModal(s = null) {
-  const v = s || { name: '', url: '', auth: 'none', token_ref: '', description: '', enabled: true, policy: '' };
+  const v = s || { name: '', url: '', auth: 'none', token_ref: '', description: '', enabled: true, policy: '', scope: '' };
   showModal(`${modalHead(s ? `Edit ${s.name}` : 'New MCP server', 'Streamable HTTP endpoint (usually ends with /mcp).')}
     <form id="mcp-form"><div class="modal-body"><div class="form-grid">
       <div class="field"><label class="label" for="mcp-name">Name</label><input class="input mono" id="mcp-name" name="name" value="${esc(v.name)}" ${s ? 'readonly' : ''} required placeholder="e.g. notion"></div>
       <div class="field"><label class="label" for="mcp-url">URL</label><input class="input mono" id="mcp-url" name="url" value="${esc(v.url)}" required placeholder="https://example.com/mcp"></div>
       <div class="field"><label class="label" for="mcp-auth">Auth</label><select class="select" id="mcp-auth" name="auth">${['none', 'bearer', 'oauth'].map((a) => `<option value="${a}" ${v.auth === a ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
       <div class="field"><label class="label" for="mcp-token">Token reference <span class="hint-inline">bearer only, vault://Item/field</span></label><input class="input mono" id="mcp-token" name="token_ref" value="${esc(v.token_ref || '')}" placeholder="vault://NOTION_TOKEN"></div>
+      <div class="field"><label class="label" for="mcp-scope">OAuth scope <span class="hint-inline">oauth only, space-separated; empty = every scope the server offers</span></label><input class="input mono" id="mcp-scope" name="scope" value="${esc(v.scope || '')}" placeholder="events:read participants:read"></div>
       <div class="field"><label class="label" for="mcp-desc">Description <span class="hint-inline">shown to the agent: what it is for, privacy rules</span></label><textarea class="input" id="mcp-desc" name="description" rows="3">${esc(v.description || '')}</textarea></div>
       <div class="field"><label class="label" for="mcp-policy">Policy <span class="hint-inline">overrides the mcp tool policy for this server</span></label><select class="select" id="mcp-policy" name="policy">${MCP_POLICIES.map(([p, l]) => `<option value="${p}" ${(v.policy || '') === p ? 'selected' : ''}>${l}${p ? '' : ' (same as the mcp tool)'}</option>`).join('')}</select></div>
       <label class="check-row"><input type="checkbox" name="enabled" ${v.enabled ? 'checked' : ''}> Enabled</label>
@@ -2115,7 +2116,7 @@ document.addEventListener('submit', async (event) => {
       closeModal(); toast('🔀 Upstream saved'); await renderProxy();
     });
   } else if (form.id === 'mcp-form') {
-    await run(async () => { await api('/mcp', { method: 'POST', body: { name: fd.get('name'), url: fd.get('url'), auth: fd.get('auth'), token_ref: String(fd.get('token_ref') || '').trim(), description: fd.get('description'), policy: fd.get('policy') || '', enabled: form.querySelector('[name="enabled"]').checked } }); closeModal(); toast('🔌 Server saved'); await renderMCP(); });
+    await run(async () => { await api('/mcp', { method: 'POST', body: { name: fd.get('name'), url: fd.get('url'), auth: fd.get('auth'), token_ref: String(fd.get('token_ref') || '').trim(), description: fd.get('description'), policy: fd.get('policy') || '', scope: String(fd.get('scope') || '').trim(), enabled: form.querySelector('[name="enabled"]').checked } }); closeModal(); toast('🔌 Server saved'); await renderMCP(); });
   } else if (form.id === 'mcp-auth-form') {
     await run(async () => { await api(`/mcp/${encodeURIComponent(form.dataset.name)}/auth/finish`, { method: 'POST', body: { redirect_url: fd.get('redirect_url') } }); closeModal(); toast('🔌 Connected'); await renderMCP(); });
   } else if (form.id === 'proxy-map-form') {

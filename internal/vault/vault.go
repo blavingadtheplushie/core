@@ -140,7 +140,11 @@ func (c *Client) bw(ctx context.Context, extraEnv []string, args ...string) (str
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
+	start := time.Now()
 	err := cmd.Run()
+	if d := time.Since(start); d > 3*time.Second {
+		slog.Info("slow bw call", "cmd", args[0], "took", d.Round(time.Millisecond))
+	}
 	if err != nil {
 		msg := cleanErr(errb.String() + "\n" + out.String())
 		if ctx.Err() == context.DeadlineExceeded {
@@ -944,7 +948,23 @@ func (c *Client) save(ctx context.Context, in SaveInput, t Target) (Item, bool, 
 	}
 	var saved Item
 	json.Unmarshal([]byte(lastJSONLine(out)), &saved)
-	c.load(ctx, false)
+	if saved.ID == "" {
+		c.load(ctx, false)
+		return saved, existing != nil, nil
+	}
+	// Patch the cache with the returned item instead of reloading the whole
+	// vault (4 more bw calls, several seconds each on this box).
+	c.mu.Lock()
+	replaced := false
+	for i := range c.items {
+		if c.items[i].ID == saved.ID {
+			c.items[i], replaced = saved, true
+		}
+	}
+	if !replaced {
+		c.items = append(c.items, saved)
+	}
+	c.mu.Unlock()
 	return saved, existing != nil, nil
 }
 

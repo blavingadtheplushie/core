@@ -35,6 +35,9 @@ type Server struct {
 	// Policy overrides the mcp tool policy for this server: auto | approve |
 	// off, empty = same as the mcp tool.
 	Policy string `json:"policy,omitempty"`
+	// Scope requested on OAuth Connect (space-separated); empty = every
+	// scope the server advertises (scopes_supported).
+	Scope string `json:"scope,omitempty"`
 }
 
 // OAuthItem is the vault item holding a server's OAuth state.

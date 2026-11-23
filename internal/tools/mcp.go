@@ -189,7 +189,7 @@ func (d *Deps) registerMCPTool() {
 			"description":  core.Str("add: one line, what it is for and its privacy rules."),
 			"policy":       core.Enum("add: per-server policy (empty = same as the mcp tool).", "auto", "approve", "off"),
 			"client_id":    core.Str("auth_start: OAuth client id if the server has no dynamic registration (optional)."),
-			"scope":        core.Str("auth_start: OAuth scope (optional)."),
+			"scope":        core.Str("add / auth_start: OAuth scope, space-separated (optional; default = the server's saved scope, else every scope it advertises)."),
 		}, "action"),
 		Summarize: func(args json.RawMessage) string {
 			s := "MCP " + field(args, "action") + " " + field(args, "server")
@@ -235,7 +235,7 @@ func (d *Deps) registerMCPTool() {
 				if !rc.Profile.AllowsMCP("") {
 					return "", errors.New("adding MCP servers needs full MCP access in your access profile")
 				}
-				s := mcp.Server{Name: a.Server, URL: a.URL, Auth: a.Auth, TokenRef: a.TokenRef, Description: a.Description, Enabled: true, Policy: a.Policy}
+				s := mcp.Server{Name: a.Server, URL: a.URL, Auth: a.Auth, TokenRef: a.TokenRef, Description: a.Description, Enabled: true, Policy: a.Policy, Scope: a.Scope}
 				if err := d.SaveMCPServer(s); err != nil {
 					return "", err
 				}

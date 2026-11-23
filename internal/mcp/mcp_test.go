@@ -96,3 +96,12 @@ func TestPickMessagePlainJSON(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestDefaultScopeUsesAdvertisedScopes(t *testing.T) {
+	if got := defaultScope(map[string]any{"scopes_supported": []any{"events:read", "groups:read"}}); got != "events:read groups:read" {
+		t.Fatalf("got %q", got)
+	}
+	if got := defaultScope(map[string]any{}); got != "" {
+		t.Fatalf("got %q", got)
+	}
+}

@@ -58,6 +58,7 @@ func discover(ctx context.Context, server string) (map[string]any, error) {
 	issuers := []string{}
 	var prm struct {
 		AuthorizationServers []string `json:"authorization_servers"`
+		ScopesSupported      []string `json:"scopes_supported"`
 	}
 	for _, p := range []string{"/.well-known/oauth-protected-resource" + u.Path, "/.well-known/oauth-protected-resource"} {
 		if getJSON(ctx, origin+p, &prm) == nil && len(prm.AuthorizationServers) > 0 {
@@ -75,11 +76,31 @@ func discover(ctx context.Context, server string) (map[string]any, error) {
 		for _, p := range []string{"/.well-known/oauth-authorization-server" + iu.Path, "/.well-known/openid-configuration" + iu.Path, iu.Path + "/.well-known/openid-configuration"} {
 			var m map[string]any
 			if getJSON(ctx, base+p, &m) == nil && m["token_endpoint"] != nil {
+				if len(prm.ScopesSupported) > 0 {
+					m["scopes_supported"] = prm.ScopesSupported
+				}
 				return m, nil
 			}
 		}
 	}
 	return nil, errors.New("no OAuth metadata found for " + server)
+}
+
+// defaultScope is every scope the server advertises (MCP spec guidance
+// when the client has no better idea).
+func defaultScope(m map[string]any) string {
+	var out []string
+	switch v := m["scopes_supported"].(type) {
+	case []string:
+		out = v
+	case []any:
+		for _, x := range v {
+			if s, ok := x.(string); ok {
+				out = append(out, s)
+			}
+		}
+	}
+	return strings.Join(out, " ")
 }
 
 func randB64(n int) string {
@@ -99,6 +120,13 @@ func (c *Client) AuthStart(ctx context.Context, s Server, clientID, clientSecret
 	m, err := discover(ctx, s.URL)
 	if err != nil {
 		return "", "", err
+	}
+	if scope == "" {
+		scope = s.Scope
+	}
+	if scope == "" {
+		// No scope = many servers (Attend…) grant a token that sees no tool.
+		scope = defaultScope(m)
 	}
 	st, _ := c.loadOAuth(ctx, s)
 	if clientID != "" {

@@ -3,6 +3,7 @@
 package cloudflare
 
 import (
+	"blavingad/internal/httpx"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -98,7 +99,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	req.Header.Set("Content-Type", "application/json")
 	hc := c.HTTP
 	if hc == nil {
-		hc = &http.Client{Timeout: 30 * time.Second}
+		hc = httpx.WithTimeout(30 * time.Second)
 	}
 	resp, err := hc.Do(req)
 	if err != nil {

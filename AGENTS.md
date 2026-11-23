@@ -83,6 +83,8 @@ Two ways to run it, same layout (`/data`, `/workspace`, seed in
 | `internal/slackbot` | Socket Mode, agent messaging experience (`agent_view.go`: DM threads, native status, titles, suggested prompts — best-effort, no-op on plain apps), message indexing, Block Kit layouts (`live.go`: working/final message, `blocks.go`: feedback row + reflection update, `interactive.go`: approvals, Stop/feedback buttons, Home tab), mrkdwn |
 | `internal/mail` | IMAP polling + SMTP sending |
 | `internal/cloudflare` | Cloudflare Tunnel API: tunnel lookup/creation, ingress routes (catch-all kept last), proxied DNS CNAMEs |
+| `internal/mcp` | The single MCP client: JSON/SSE JSON-RPC, sessions, bearer or OAuth (discovery, dynamic registration, PKCE, refresh on expiry/401), state in vault items `MCP_OAUTH_<NAME>`; servers configured in setting `mcp.servers` (dashboard `#/mcp`) |
+| `internal/httpx` | Shared outbound `http.Client` |
 | `internal/vault` | Vaultwarden through the Bitwarden CLI: unlock, in-memory cache, `vault://` references, env resolution, save/generate |
 | `internal/scheduler` | Cron / one-shot tasks |
 | `internal/selfupdate` | Supervisor, build/upgrade/rollback, git plumbing |
@@ -144,7 +146,45 @@ d.Reg.Add(&core.Tool{
 - Tools reading memory or past conversations must be listed in
   `memoryReadTools` / `memoryWriteTools` (`core/access.go`) so memory modes apply.
 
-For quick, script-level capabilities prefer `tool_create` (hot-loaded, no rebuild).
+### 4.1 Where does a new capability go? (read before adding anything)
+
+Decide in this order, and stop at the first that fits:
+
+1. **It already exists?** Search first: `GET /api/tools`, the skills index,
+   `mcp action=servers`. Extend the existing tool/skill instead of adding a
+   twin. Two tools that look alike may do different things (e.g. `bg_remove`
+   = BGNinja on a local file vs Figma's own background removal through the
+   `mcp` figma server): check what they really do before merging or deleting.
+2. **It is an MCP server?** Never write a client. Add it in the dashboard
+   (`#/mcp`) or with `mcp action=add` (auth none / bearer `vault://…` /
+   oauth). One generic `mcp` tool serves every server (`internal/mcp`).
+3. **It is one or two plain HTTP calls?** That is a **skill**, not a tool:
+   document the endpoint, headers and pitfalls, and use `http_request` with
+   `{{vault://…}}` headers.
+4. **It needs real logic (auth dance, parsing, pagination, formatting) and is
+   used often?** A **custom tool** (`tool_create`): scripts get secrets only
+   through the `secrets` parameter (`{"ENV": "vault://Item/field"}` → env
+   vars at call time). Reading `/data/secrets` or any plaintext credential file
+   is refused. Group related operations behind one `action` parameter
+   (like `seerr`, `silo`, `gsheets`), never one tool per endpoint.
+5. **It touches the harness, Slack/web UI, access control, approvals, or must
+   be fast/safe at scale?** A **Go built-in** in `internal/tools` (this section).
+
+Rules that always apply:
+- **Secrets live only in the vault.** No token in files, code, settings,
+  memory, commits. OAuth state goes to a vault item (see `internal/mcp`).
+- **Deploy apps on Orchard**, not inside the LXC (no Docker deploy tools).
+  Static sites may use Cloudflare Pages/GitHub Pages.
+- **One shared helper per concern**: HTTP via `internal/httpx` (no new
+  `http.Client{}`), truncation via `textutil.*` / `tools.Clip`, MCP via
+  `internal/mcp`. Do not copy-paste a helper into another package.
+- **Keep the tool count low**: every tool costs prompt tokens on every turn.
+  Prefer an `action` enum over a new tool; prefer a skill over a tool.
+  Deleting is fine, but only after checking real usage
+  (`SELECT name, COUNT(*) FROM run_steps WHERE kind='tool' GROUP BY name`).
+- **Skills complement tools, they do not duplicate them**: a skill carries the
+  workflow, defaults and pitfalls; the tool description stays short.
+- **Verify once, after**: one real call after creating/changing a tool.
 
 ## 5. Web UI
 

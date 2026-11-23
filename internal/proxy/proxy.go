@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"blavingad/internal/httpx"
 	"context"
 	"net/http"
 	"sync"
@@ -30,7 +31,7 @@ type Proxy struct {
 func New(st *store.Store, resolve Resolver, configKey string) *Proxy {
 	return &Proxy{
 		st: st, resolve: resolve, configKey: configKey,
-		client:   &http.Client{Timeout: 15 * time.Minute},
+		client:   httpx.WithTimeout(15 * time.Minute),
 		Cooldown: 2 * time.Minute,
 		downTo:   map[string]time.Time{}, lastEr: map[string]string{},
 	}

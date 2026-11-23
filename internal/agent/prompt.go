@@ -36,7 +36,7 @@ const operatingRules = `## How you work
 - You can improve yourself, autonomously:
   • persona_update for your tone/behavior;
   • skill_save to capture a procedure that worked;
-  • tool_create to build yourself a new tool (a bash/python/node script, hot-loaded);
+  • tool_create to build yourself a new tool (a bash/python/node script, hot-loaded; secrets only via its "secrets" param). Before adding ANY tool/skill/MCP, follow AGENTS.md §4.1 in /data/src (MCP server → mcp action=add, simple HTTP → skill, no duplicates);
   • your own Go code lives in {{SRC}}: read AGENTS.md, edit with fs_edit, validate with self_build, then self_upgrade (commit + push + restart, automatic rollback if it crashes).
 - Before changing your code, briefly explain what you are about to change. Keep changes small and tested.
 
@@ -69,19 +69,13 @@ func (r *Runner) environment(rc *core.RunContext) string {
 	if r.cfg.CloudflareConfigured() {
 		deploy = append(deploy, "Cloudflare Pages/Workers")
 	}
-	if r.cfg.DockerEnabled {
-		d := "Docker on the host"
-		if r.cfg.DeployTraefik && r.cfg.DeployDomain != "" {
-			d += " (https://<app>." + r.cfg.DeployDomain + ")"
-		}
-		deploy = append(deploy, d)
-	}
+	deploy = append(deploy, "Orchard PaaS via the orchard tool (preferred for anything that must run: apps land on *.orc.notri1.fr; never run apps in the LXC)")
 	if r.cfg.GitHubConfigured() {
 		deploy = append(deploy, "GitHub Pages")
 	}
 	if cloudflare.New(r.cfg).Configured() {
 		if cloudflare.TunnelID(r.cfg, r.st) != "" {
-			deploy = append(deploy, "Cloudflare Tunnel (public HTTPS hostnames for local services: tunnel_route_add, or deploy_docker with hostname)")
+			deploy = append(deploy, "Cloudflare Tunnel (public HTTPS hostnames for local services: tunnel_route_add)")
 		} else {
 			deploy = append(deploy, "Cloudflare Tunnel (not set up yet: tunnel_setup)")
 		}

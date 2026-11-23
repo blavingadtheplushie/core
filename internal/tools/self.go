@@ -193,10 +193,23 @@ func registerSelf(d *Deps) {
 			"parameters":  core.Str("JSON Schema (object) of the arguments, serialized. E.g. {\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"}},\"required\":[\"city\"]}"),
 			"runtime":     core.Enum("Interpreter.", "bash", "python", "node"),
 			"code":        core.Str("Script source code."),
+			"secrets":     map[string]any{"type": "object", "description": "Env vars filled from the vault at each call: {\"API_KEY\": \"vault://Item/field\"}. Never read secrets from files.", "additionalProperties": map[string]any{"type": "string"}},
 		}, "name", "description", "parameters", "runtime", "code"),
 		Summarize: summarizeField("New tool ", "name", 40),
 		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
-			a, _ := core.Parse[struct{ Name, Description, Parameters, Runtime, Code string }](args)
+			a, _ := core.Parse[struct {
+				Name, Description, Parameters, Runtime, Code string
+				Secrets                                      map[string]string
+			}](args)
+			if strings.Contains(a.Code, "/data/secrets") {
+				return "", errors.New("don't read secrets from files: pass them with the secrets parameter (vault refs → env vars)")
+			}
+			for k, v := range a.Secrets {
+				if !strings.HasPrefix(v, "vault://") {
+					return "", fmt.Errorf("secrets.%s must be a vault:// reference", k)
+				}
+			}
+			secJSON, _ := json.Marshal(a.Secrets)
 			if !reToolName.MatchString(a.Name) {
 				return "", errors.New("invalid name (snake_case, 3-40 characters)")
 			}
@@ -211,13 +224,13 @@ func registerSelf(d *Deps) {
 				return "", errors.New("unknown runtime")
 			}
 			now := store.Now()
-			_, err := d.St.DB.Exec(`INSERT INTO custom_tools(id, name, description, parameters, runtime, code, author, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?)
-				ON CONFLICT(name) DO UPDATE SET description=excluded.description, parameters=excluded.parameters, runtime=excluded.runtime, code=excluded.code, enabled=1, updated_at=excluded.updated_at`,
-				store.NewID("ctl"), a.Name, a.Description, a.Parameters, a.Runtime, a.Code, rc.Actor(), now, now)
+			_, err := d.St.DB.Exec(`INSERT INTO custom_tools(id, name, description, parameters, runtime, code, secrets, author, created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?)
+				ON CONFLICT(name) DO UPDATE SET description=excluded.description, parameters=excluded.parameters, runtime=excluded.runtime, code=excluded.code, secrets=excluded.secrets, enabled=1, updated_at=excluded.updated_at`,
+				store.NewID("ctl"), a.Name, a.Description, a.Parameters, a.Runtime, a.Code, string(secJSON), rc.Actor(), now, now)
 			if err != nil {
 				return "", err
 			}
-			d.addCustomTool(a.Name, a.Description, schema, a.Runtime, a.Code)
+			d.addCustomTool(a.Name, a.Description, schema, a.Runtime, a.Code, a.Secrets)
 			d.evolution(rc, "tool", "New tool \""+a.Name+"\": "+a.Description, a.Code)
 			return "🛠️ Tool \"" + a.Name + "\" created and loaded. You can call it right away (it requires approval by default; an admin can switch it to auto).", nil
 		},
@@ -246,7 +259,7 @@ var runtimes = map[string][2]string{
 	"node":   {"node", ".mjs"},
 }
 
-func (d *Deps) addCustomTool(name, desc string, schema map[string]any, runtime, code string) {
+func (d *Deps) addCustomTool(name, desc string, schema map[string]any, runtime, code string, secrets map[string]string) {
 	rt := runtimes[runtime]
 	// Avoid stacking the suffix when a tool is re-created from its own description.
 	for strings.HasSuffix(strings.TrimSpace(desc), "[tool created by you]") {
@@ -263,9 +276,13 @@ func (d *Deps) addCustomTool(name, desc string, schema map[string]any, runtime, 
 		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
 			ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 			defer cancel()
+			secEnv, err := d.toolSecrets(ctx, rc, name, secrets)
+			if err != nil {
+				return "", err
+			}
 			cmd := exec.CommandContext(ctx, rt[0], script)
 			cmd.Dir = d.Cfg.WorkspaceDir
-			cmd.Env = append(append(os.Environ(), d.toolEnv()...), "TOOL_ARGS="+string(args), "RUN_ID="+rc.RunID)
+			cmd.Env = append(append(append(os.Environ(), d.toolEnv()...), secEnv...), "TOOL_ARGS="+string(args), "RUN_ID="+rc.RunID)
 			cmd.Stdin = strings.NewReader(string(args))
 			out, err := cmd.CombinedOutput()
 			if err != nil {
@@ -277,20 +294,44 @@ func (d *Deps) addCustomTool(name, desc string, schema map[string]any, runtime, 
 }
 
 func LoadCustomTools(d *Deps) {
-	rows, err := d.St.DB.Query(`SELECT name, description, parameters, runtime, code FROM custom_tools WHERE enabled = 1`)
+	rows, err := d.St.DB.Query(`SELECT name, description, parameters, runtime, code, secrets FROM custom_tools WHERE enabled = 1`)
 	if err != nil {
 		return
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var name, desc, params, runtime, code string
-		rows.Scan(&name, &desc, &params, &runtime, &code)
+		var name, desc, params, runtime, code, secrets string
+		rows.Scan(&name, &desc, &params, &runtime, &code, &secrets)
+		var sec map[string]string
+		json.Unmarshal([]byte(secrets), &sec)
 		var schema map[string]any
 		if json.Unmarshal([]byte(params), &schema) != nil {
 			continue
 		}
 		if _, ok := runtimes[runtime]; ok {
-			d.addCustomTool(name, desc, schema, runtime, code)
+			d.addCustomTool(name, desc, schema, runtime, code, sec)
 		}
 	}
+}
+
+// toolSecrets resolves the vault refs an admin attached to a custom tool.
+// The refs are part of the tool's config (not chosen by the model), so the
+// person only needs access to the tool itself, not to the vault category.
+func (d *Deps) toolSecrets(ctx context.Context, rc *core.RunContext, tool string, refs map[string]string) ([]string, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	if !d.vaultReady() {
+		return nil, errors.New("this tool needs the vault, which is not configured")
+	}
+	var env []string
+	for k, ref := range refs {
+		v, err := d.resolveRef(ctx, ref)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", k, err)
+		}
+		env = append(env, k+"="+v)
+	}
+	d.St.Audit(rc.Actor(), "vault.use", "tool:"+tool, refs)
+	return env, nil
 }

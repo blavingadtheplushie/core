@@ -3,6 +3,7 @@
 package llm
 
 import (
+	"blavingad/internal/httpx"
 	"blavingad/internal/textutil"
 	"bytes"
 	"context"
@@ -130,7 +131,7 @@ const (
 )
 
 func New(baseURL, apiKey string) *Client {
-	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), APIKey: apiKey, HTTP: &http.Client{Timeout: 5 * time.Minute}}
+	return &Client{BaseURL: strings.TrimRight(baseURL, "/"), APIKey: apiKey, HTTP: httpx.WithTimeout(5 * time.Minute)}
 }
 
 func (c *Client) endpoint() (string, string) {

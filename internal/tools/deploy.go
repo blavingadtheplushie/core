@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"os"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 
-	"blavingad/internal/cloudflare"
 	"blavingad/internal/core"
 	"blavingad/internal/store"
 	"blavingad/internal/textutil"
@@ -45,7 +43,6 @@ func (d *Deps) recordDeploy(rc *core.RunContext, kind, name, url, status string,
 
 func registerDeploy(d *Deps) {
 	cfOK := d.Cfg.CloudflareConfigured
-	dockerOK := func() bool { return d.Cfg.DockerEnabled }
 
 	d.Reg.Add(&core.Tool{
 		Name: "deploy_cloudflare_pages", Category: "deploy", Emoji: "🚀", Risk: core.RiskSensitive, Available: cfOK,
@@ -110,138 +107,6 @@ func registerDeploy(d *Deps) {
 			}
 			d.recordDeploy(rc, "cloudflare_worker", name, url, "live", map[string]string{"path": dir})
 			return "✅ Worker deployed " + url + "\n\n" + Clip(res.Output, 3000), nil
-		},
-	})
-
-	d.Reg.Add(&core.Tool{
-		Name: "deploy_docker", Category: "deploy", Emoji: "🐳", Risk: core.RiskSensitive, Available: dockerOK,
-		Description: "Deploys an app as a Docker container on the host: builds from a folder with a Dockerfile (or uses an existing image), then (re)starts the container persistently and exposes it. Returns the URL.",
-		Params: core.Obj(map[string]any{
-			"name":     core.Str("App name (lowercase, dashes)."),
-			"path":     core.Str("Folder containing the Dockerfile (or empty if using an image)."),
-			"image":    core.Str("Image to run when there is no build (e.g. nginx:alpine)."),
-			"port":     core.Int("Port listened on INSIDE the container (e.g. 3000)."),
-			"env":      map[string]any{"type": "object", "description": "Environment variables.", "additionalProperties": map[string]any{"type": "string"}},
-			"hostname": core.Str("Optional public hostname (e.g. app.example.com) to publish it through the Cloudflare Tunnel, with HTTPS."),
-		}, "name", "port"),
-		Summarize: summarizeField("Docker: ", "name", 40),
-		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
-			a, _ := core.Parse[struct {
-				Name, Path, Image, Hostname string
-				Port                        int
-				Env                         map[string]string
-			}](args)
-			name := slugify(a.Name)
-			if name == "" || a.Port <= 0 {
-				return "", errors.New("name and port are required")
-			}
-			container := "blv-" + name
-			image := a.Image
-			var log strings.Builder
-			if a.Path != "" {
-				dir, err := d.resolvePath(a.Path)
-				if err != nil {
-					return "", err
-				}
-				image = container + ":latest"
-				if rc.Progress != nil {
-					rc.Progress("🏗️ Building image " + image)
-				}
-				res := d.sh(ctx, dir, "docker build -t "+q(image)+" .", 20*time.Minute)
-				log.WriteString(Clip(res.Output, 3000))
-				if res.ExitCode != 0 {
-					d.recordDeploy(rc, "docker", name, "", "failed", map[string]string{"stage": "build"})
-					return "", fmt.Errorf("build failed:\n%s", Clip(res.Output, 5000))
-				}
-			}
-			if image == "" {
-				return "", errors.New("path or image is required")
-			}
-			hostPort := d.dockerPort(name)
-			run := []string{"docker run -d --name", q(container), "--restart unless-stopped", "--label blavingad.app=" + q(name)}
-			url := fmt.Sprintf("http://%s:%d", d.Cfg.DeployHost, hostPort)
-			if d.Cfg.DeployNetwork != "" {
-				run = append(run, "--network", q(d.Cfg.DeployNetwork))
-			}
-			if d.Cfg.DeployTraefik && d.Cfg.DeployDomain != "" {
-				host := name + "." + d.Cfg.DeployDomain
-				url = "https://" + host
-				run = append(run,
-					"--label traefik.enable=true",
-					"--label "+q("traefik.http.routers."+container+".rule=Host(`"+host+"`)"),
-					"--label "+q("traefik.http.routers."+container+".tls.certresolver=letsencrypt"),
-					"--label "+q(fmt.Sprintf("traefik.http.services.%s.loadbalancer.server.port=%d", container, a.Port)))
-			} else {
-				run = append(run, "-p", fmt.Sprintf("%d:%d", hostPort, a.Port))
-			}
-			keys := make([]string, 0, len(a.Env))
-			for k := range a.Env {
-				keys = append(keys, k)
-			}
-			sort.Strings(keys)
-			for _, k := range keys {
-				run = append(run, "-e", q(k+"="+a.Env[k]))
-			}
-			run = append(run, q(image))
-			d.sh(ctx, "", "docker rm -f "+q(container), time.Minute)
-			res := d.sh(ctx, "", strings.Join(run, " "), 5*time.Minute)
-			if res.ExitCode != 0 {
-				d.recordDeploy(rc, "docker", name, url, "failed", map[string]any{"stage": "run", "port": hostPort})
-				return "", fmt.Errorf("start failed:\n%s", Clip(res.Output, 4000))
-			}
-			time.Sleep(3 * time.Second)
-			state := d.sh(ctx, "", "docker inspect -f '{{.State.Status}}' "+q(container), 30*time.Second)
-			logs := d.sh(ctx, "", "docker logs --tail 20 "+q(container), 30*time.Second)
-			tunnelNote := ""
-			if a.Hostname != "" {
-				if cf, id, err := d.tunnel(); err != nil {
-					tunnelNote = "\n⚠️ Not published on " + a.Hostname + ": " + err.Error()
-				} else if msg, err := cf.AddRoute(ctx, id, cloudflare.Route{Hostname: a.Hostname, Service: d.tunnelService(container, hostPort, a.Port)}); err != nil {
-					tunnelNote = "\n⚠️ Not published on " + a.Hostname + ": " + err.Error()
-				} else {
-					url = "https://" + strings.ToLower(strings.TrimSpace(a.Hostname))
-					tunnelNote = "\n🚇 " + msg
-				}
-			}
-			d.recordDeploy(rc, "docker", name, url, "live", map[string]any{"image": image, "port": hostPort, "container_port": a.Port, "container": container, "hostname": a.Hostname})
-			return fmt.Sprintf("✅ %s started (%s) → %s%s\n\nLatest logs:\n%s", container, strings.TrimSpace(state.Output), url, tunnelNote, Clip(logs.Output, 2000)), nil
-		},
-	})
-
-	d.Reg.Add(&core.Tool{
-		Name: "docker_manage", Category: "deploy", Emoji: "🛳️", Risk: core.RiskSensitive, Available: dockerOK,
-		Description: "Manages the Docker apps you deployed: list, logs, restart, stop, remove. list and logs need no approval.",
-		Params: core.Obj(map[string]any{
-			"action": core.Enum("Action.", "list", "logs", "restart", "stop", "remove"),
-			"name":   core.Str("App name (except for list)."),
-		}, "action"),
-		NeedsApproval: func(args json.RawMessage) bool {
-			a := field(args, "action")
-			return a != "list" && a != "logs"
-		},
-		Summarize: func(args json.RawMessage) string {
-			return "Docker " + field(args, "action") + " " + field(args, "name")
-		},
-		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
-			a, _ := core.Parse[struct{ Action, Name string }](args)
-			c := q("blv-" + slugify(a.Name))
-			var cmd string
-			switch a.Action {
-			case "list":
-				cmd = `docker ps -a --filter label=blavingad.app --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Image}}'`
-			case "logs":
-				cmd = "docker logs --tail 120 " + c
-			case "restart":
-				cmd = "docker restart " + c
-			case "stop":
-				cmd = "docker stop " + c
-			case "remove":
-				cmd = "docker rm -f " + c
-				d.St.DB.Exec(`UPDATE deployments SET status = 'removed' WHERE kind = 'docker' AND name = ?`, slugify(a.Name))
-			default:
-				return "", errors.New("unknown action")
-			}
-			return d.sh(ctx, "", cmd, 2*time.Minute).String(), nil
 		},
 	})
 
@@ -315,26 +180,4 @@ func registerDeploy(d *Deps) {
 			return b.String(), nil
 		},
 	})
-}
-
-// dockerPort keeps an app on the same host port across redeploys.
-func (d *Deps) dockerPort(name string) int {
-	rows, _ := d.St.Rows(`SELECT name, details FROM deployments WHERE kind = 'docker' AND details LIKE '%"port"%'`)
-	used := map[int]bool{}
-	for _, r := range rows {
-		var det struct{ Port int }
-		json.Unmarshal([]byte(fmt.Sprint(r["details"])), &det)
-		if det.Port == 0 {
-			continue
-		}
-		if r["name"] == name {
-			return det.Port
-		}
-		used[det.Port] = true
-	}
-	p := d.Cfg.DeployPortBase
-	for used[p] {
-		p++
-	}
-	return p
 }

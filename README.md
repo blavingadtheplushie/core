@@ -20,7 +20,7 @@ design system, protected by OIDC.
 | 💻 **Code** | Shell inside the container (git, gh, go, node, bun, python, wrangler, docker), file read/write/edit, ripgrep search. |
 | 🐙 **GitHub** | Its own account: full REST API, search, repository creation, git push. |
 | 📬 **Email** | Its own address (IMAP/SMTP): it reads, summarizes, replies — and can handle incoming mail on its own. |
-| 🚀 **Deployment** | Cloudflare Pages & Workers, Docker containers on the host (with optional Traefik + HTTPS), GitHub Pages, and a **Cloudflare Tunnel**: it publishes any local service on your domains (`tunnel_route_add`, or `deploy_docker` with a `hostname`), DNS included. |
+| 🚀 **Deployment** | Cloudflare Pages & Workers, GitHub Pages, and a **Cloudflare Tunnel**: it publishes any local service on your domains (`tunnel_route_add`), DNS included. |
 | ⏰ **Tasks** | Reminders and cron routines it runs with all of its tools. |
 | 🧑‍🚀 **Sub-agents** | It delegates subtasks to sub-agents working in parallel. |
 | 🧬 **Self-improvement** | Rewrites its persona, builds up skills, **creates new tools for itself** that are hot-loaded, and **modifies its own Go code** (build + tests → commit → push → restart, with **automatic rollback** if the new version crashes). Daily review of its mistakes and 👎 feedback. |

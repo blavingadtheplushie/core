@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"blavingad/internal/httpx"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -16,7 +17,7 @@ import (
 	"blavingad/internal/textutil"
 )
 
-var httpClient = &http.Client{Timeout: 60 * time.Second}
+var httpClient = httpx.Client
 
 func (d *Deps) exa(ctx context.Context, path string, body any) (map[string]any, error) {
 	payload, _ := json.Marshal(body)

@@ -317,6 +317,7 @@ func serve() int {
 		Vault:         vc,
 		LLM:           client,
 		Proxy:         llmProxy,
+		MCP:           deps,
 		RunSchedule:   runSchedule,
 		RunSelfReview: selfReview,
 		ReloadSched:   sched.Reload,

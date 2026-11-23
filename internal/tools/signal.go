@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"blavingad/internal/httpx"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -30,7 +31,7 @@ func signalContainer() string {
 	return textutil.FirstNonEmpty(os.Getenv("SIGNAL_CONTAINER"), "signal-api")
 }
 
-var signalHTTP = &http.Client{Timeout: 60 * time.Second}
+var signalHTTP = httpx.Client
 
 func signalDo(ctx context.Context, method, path string, body any) ([]byte, error) {
 	var rd io.Reader

@@ -41,6 +41,7 @@ type Hooks struct {
 	ReloadSched   func()
 	LLM           *llm.Client
 	Proxy         *proxy.Proxy
+	MCP           MCPHooks
 }
 
 type Server struct {
@@ -182,6 +183,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/proxy/mappings", a(s.deleteProxyMapping))
 	mux.HandleFunc("POST /api/proxy/keys", a(s.createProxyKey))
 	mux.HandleFunc("DELETE /api/proxy/keys/{id}", a(s.deleteProxyKey))
+
+	mux.HandleFunc("GET /api/mcp", a(s.listMCP))
+	mux.HandleFunc("POST /api/mcp", a(s.saveMCP))
+	mux.HandleFunc("DELETE /api/mcp/{name}", a(s.deleteMCP))
+	mux.HandleFunc("POST /api/mcp/{name}/test", a(s.testMCP))
+	mux.HandleFunc("POST /api/mcp/{name}/auth/start", a(s.mcpAuthStart))
+	mux.HandleFunc("POST /api/mcp/{name}/auth/finish", a(s.mcpAuthFinish))
 
 	mux.HandleFunc("GET /api/access", a(s.getAccess))
 	mux.HandleFunc("PUT /api/access/default", a(s.setAccessDefault))

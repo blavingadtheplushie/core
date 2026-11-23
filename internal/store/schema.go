@@ -397,4 +397,8 @@ ALTER TABLE run_steps ADD COLUMN usage TEXT;
 ALTER TABLE runs ADD COLUMN cache_read_tokens INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE runs ADD COLUMN cache_write_tokens INTEGER NOT NULL DEFAULT 0;
 `,
+	// 7 — custom tools get vault-backed env vars (JSON {"ENV": "vault://Item/field"}).
+	`
+ALTER TABLE custom_tools ADD COLUMN secrets TEXT NOT NULL DEFAULT '{}';
+`,
 }

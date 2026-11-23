@@ -425,7 +425,7 @@ function renderLogin(error = '') {
 const NAV = [
   ['Workshop', [['dashboard', '#/', 'dashboard', 'Overview'], ['chat', '#/chat', 'chat', 'Chat'], ['runs', '#/runs', 'runs', 'Runs'], ['approvals', '#/approvals', 'hand', 'Approvals']]],
   ['Brain', [['memory', '#/memory', 'brain', 'Memory'], ['tools', '#/tools', 'tool', 'Tools'], ['skills', '#/skills', 'book', 'Persona & skills'], ['evolution', '#/evolution', 'dna', 'Evolution']]],
-  ['Actions', [['schedules', '#/schedules', 'clock', 'Tasks'], ['deployments', '#/deployments', 'rocket', 'Deployments'], ['proxy', '#/proxy', 'route', 'LLM proxy'], ['mail', '#/mail', 'mail', 'Mailbox']]],
+  ['Actions', [['schedules', '#/schedules', 'clock', 'Tasks'], ['deployments', '#/deployments', 'rocket', 'Deployments'], ['proxy', '#/proxy', 'route', 'LLM proxy'], ['mcp', '#/mcp', 'tool', 'MCP servers'], ['mail', '#/mail', 'mail', 'Mailbox']]],
   ['System', [['access', '#/access', 'shield', 'Access'], ['vault', '#/vault', 'lock', 'Vault'], ['audit', '#/audit', 'audit', 'Audit log'], ['settings', '#/settings', 'settings', 'Settings']]],
 ];
 
@@ -1099,7 +1099,7 @@ async function loadChannels() {
 /* ---------- Tools ---------- */
 const CATEGORIES = {
   web: ['🌐', 'Web'], slack: ['💬', 'Slack'], memory: ['🧠', 'Memory'], code: ['💻', 'Code & files'], github: ['🐙', 'GitHub'],
-  email: ['📬', 'Email'], deploy: ['🚀', 'Deployment'], self: ['🧬', 'Self-improvement'], system: ['⚙️', 'System'], access: ['🛂', 'Access'], vault: ['🔐', 'Vault'], audio: ['🗣️', 'Audio'], signal: ['📡', 'Signal'], discord: ['🎮', 'Discord'], custom: ['🧩', 'Agent-created'],
+  email: ['📬', 'Email'], deploy: ['🚀', 'Deployment'], self: ['🧬', 'Self-improvement'], system: ['⚙️', 'System'], access: ['🛂', 'Access'], vault: ['🔐', 'Vault'], audio: ['🗣️', 'Audio'], signal: ['📡', 'Signal'], mcp: ['🔌', 'MCP'], discord: ['🎮', 'Discord'], custom: ['🧩', 'Agent-created'],
 };
 const POLICIES = [['auto', 'Auto'], ['approve', 'Approve'], ['off', 'Off']];
 
@@ -1256,7 +1256,7 @@ function scheduleModal() {
 }
 
 /* ---------- Deployments ---------- */
-const DEPLOY_KINDS = { cloudflare_pages: ['☁️', 'Cloudflare Pages'], cloudflare_worker: ['⚡', 'Cloudflare Worker'], docker: ['🐳', 'Docker'], github_pages: ['🐙', 'GitHub Pages'], tunnel: ['🚇', 'Cloudflare Tunnel'] };
+const DEPLOY_KINDS = { cloudflare_pages: ['☁️', 'Cloudflare Pages'], cloudflare_worker: ['⚡', 'Cloudflare Worker'], docker: ['🐳', 'Docker (legacy)'], github_pages: ['🐙', 'GitHub Pages'], tunnel: ['🚇', 'Cloudflare Tunnel'] };
 function deployStatus(status) {
   const map = { live: ['Live', 'ok'], failed: ['Failed', 'bad'], removed: ['Removed', ''] };
   const [label, cls] = map[status] || [status, ''];
@@ -1300,7 +1300,7 @@ async function renderDeployments() {
   if (seq !== state.routeSeq) return;
   const items = data.items || [];
   const historyRows = data.history || [];
-  view.innerHTML = `${pageHead('Deployments', 'Everything it has put live: Cloudflare Pages & Workers, Docker containers, GitHub Pages, Cloudflare Tunnel routes.', '', 'Actions')}
+  view.innerHTML = `${pageHead('Deployments', 'Everything it has put live: Cloudflare Pages & Workers, GitHub Pages, Cloudflare Tunnel routes (apps that must run go on Orchard).', '', 'Actions')}
     ${tunnelCard(tunnel)}
     ${items.length ? `<div class="deploy-grid" style="margin-bottom:16px">${items.map((d) => `
       <section class="card deploy-card">
@@ -1378,6 +1378,47 @@ function proxyKeyShown(secret, base) {
     <div class="modal-body"><div class="field"><label class="label">API key</label><input class="input mono" readonly value="${esc(secret)}" onclick="this.select()"></div>
     ${base ? `<p class="hint">Base URL: <code>${esc(base)}</code></p>` : ''}</div>
     <div class="modal-foot"><button class="btn" data-action="copy-text" data-text="${esc(secret)}">${icon('copy', 'btn-icon')} Copy</button><button class="btn primary" data-action="close-modal">Done</button></div>`);
+}
+
+/* ---------- MCP servers ---------- */
+async function renderMCP() {
+  const seq = ++state.routeSeq;
+  setNav('mcp');
+  setCrumbs('MCP servers');
+  const view = document.getElementById('view');
+  let d;
+  try { d = await api('/mcp'); } catch (error) { view.innerHTML = `${pageHead('MCP servers', '', '', 'Actions')}${errorState(error.message)}`; return; }
+  if (seq !== state.routeSeq) return;
+  state.cache.mcp = d;
+  const rows = d.servers || [];
+  const st = (x) => x.status === 'connected' || x.status === 'public' || x.status.startsWith('bearer') ? badge(x.status, 'ok') : badge(x.status, 'warn');
+  view.innerHTML = `${pageHead('MCP servers', 'Remote MCP servers it can call through the single <code>mcp</code> tool. Tokens never live here: bearer tokens are <code>vault://</code> references, OAuth tokens are stored (and refreshed) in vault items <code>MCP_OAUTH_&lt;NAME&gt;</code>.', `<button class="btn primary" data-action="mcp-new">${icon('plus', 'btn-icon')} Server</button>`, 'Actions')}
+    <section class="card"><div class="card-body flush">${rows.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Name</th><th>URL</th><th>Auth</th><th>Status</th><th>Description</th><th></th></tr></thead><tbody>${rows.map((x) => { const s = x.server; return `<tr>
+      <td><div class="link-title">${esc(s.name)}</div>${s.enabled ? '' : badge('off', 'plain')}</td><td class="truncate-cell small mono">${esc(s.url)}</td><td class="small">${esc(s.auth)}${s.token_ref ? ` <code class="small">${esc(s.token_ref)}</code>` : ''}</td><td>${st(x)}</td><td class="small">${esc(truncate(s.description || '', 120))}</td>
+      <td class="actions"><div class="action-row"><button class="btn sm" data-action="mcp-test" data-id="${esc(s.name)}">Test</button>${s.auth === 'oauth' ? `<button class="btn sm" data-action="mcp-auth" data-id="${esc(s.name)}">Connect</button>` : ''}<button class="icon-btn" data-action="mcp-edit" data-id="${esc(s.name)}" aria-label="Edit" title="Edit">${icon('edit')}</button><button class="icon-btn danger" data-action="mcp-delete" data-id="${esc(s.name)}" aria-label="Delete" title="Delete">${icon('trash')}</button></div></td></tr>`; }).join('')}</tbody></table></div>` : emptyState('No MCP server', 'Add one with its URL: public, bearer token from the vault, or OAuth.', '<button class="btn primary" data-action="mcp-new">Add a server</button>')}</div></section>`;
+}
+
+function mcpModal(s = null) {
+  const v = s || { name: '', url: '', auth: 'none', token_ref: '', description: '', enabled: true };
+  showModal(`${modalHead(s ? `Edit ${s.name}` : 'New MCP server', 'Streamable HTTP endpoint (usually ends with /mcp).')}
+    <form id="mcp-form"><div class="modal-body"><div class="form-grid">
+      <div class="field"><label class="label" for="mcp-name">Name</label><input class="input mono" id="mcp-name" name="name" value="${esc(v.name)}" ${s ? 'readonly' : ''} required placeholder="e.g. notion"></div>
+      <div class="field"><label class="label" for="mcp-url">URL</label><input class="input mono" id="mcp-url" name="url" value="${esc(v.url)}" required placeholder="https://example.com/mcp"></div>
+      <div class="field"><label class="label" for="mcp-auth">Auth</label><select class="select" id="mcp-auth" name="auth">${['none', 'bearer', 'oauth'].map((a) => `<option value="${a}" ${v.auth === a ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+      <div class="field"><label class="label" for="mcp-token">Token reference <span class="hint-inline">bearer only, vault://Item/field</span></label><input class="input mono" id="mcp-token" name="token_ref" value="${esc(v.token_ref || '')}" placeholder="vault://NOTION_TOKEN"></div>
+      <div class="field"><label class="label" for="mcp-desc">Description <span class="hint-inline">shown to the agent: what it is for, privacy rules</span></label><textarea class="input" id="mcp-desc" name="description" rows="3">${esc(v.description || '')}</textarea></div>
+      <label class="check-row"><input type="checkbox" name="enabled" ${v.enabled ? 'checked' : ''}> Enabled</label>
+    </div></div><div class="modal-foot"><button class="btn" type="button" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
+}
+
+async function mcpAuth(name) {
+  try {
+    const res = await api(`/mcp/${encodeURIComponent(name)}/auth/start`, { method: 'POST', body: {} });
+    showModal(`${modalHead(`Connect ${name}`, 'Open the link, approve, then paste the 127.0.0.1 URL you land on (the page will not load, that is expected).')}
+      <form id="mcp-auth-form" data-name="${esc(name)}"><div class="modal-body"><p><a class="btn" href="${esc(res.url)}" target="_blank" rel="noopener noreferrer">Open the authorization page</a></p>
+      <div class="field"><label class="label" for="mcp-redirect">Redirect URL</label><input class="input mono" id="mcp-redirect" name="redirect_url" required placeholder="http://127.0.0.1:33418/callback?code=…"></div></div>
+      <div class="modal-foot"><button class="btn" type="button" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Connect</button></div></form>`);
+  } catch (error) { toast(error.message, 'err'); }
 }
 
 /* ---------- Mail ---------- */
@@ -1896,6 +1937,13 @@ document.addEventListener('click', async (event) => {
         confirmDialog({ title: 'Remove from the allowlist?', message: `This person will get the default profile (${state.cache.access?.default || 'guest'}).`, confirm: 'Remove', onConfirm: async () => { await api(`/access/members/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast('Removed from the allowlist'); await renderAccess(); } });
         break;
       case 'llm-test': await testModel(target); break;
+      case 'mcp-new': mcpModal(); break;
+      case 'mcp-edit': mcpModal((state.cache.mcp?.servers || []).map((x) => x.server).find((x) => x.name === id)); break;
+      case 'mcp-auth': await mcpAuth(id); break;
+      case 'mcp-test': { try { const res = await api(`/mcp/${encodeURIComponent(id)}/test`, { method: 'POST' }); toast(`🔌 ${id}: ${res.tools.length} tools`); } catch (error) { toast(error.message, 'err'); } break; }
+      case 'mcp-delete':
+        confirmDialog({ title: `Delete ${id}?`, message: 'The server is removed from the list. Its vault items stay (delete them in the Vault page if needed).', confirm: 'Delete', onConfirm: async () => { await api(`/mcp/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast('Server deleted'); await renderMCP(); } });
+        break;
       case 'proxy-upstream-new': proxyUpstreamModal(); break;
       case 'proxy-upstream-edit': proxyUpstreamModal((state.cache.proxy?.upstreams || []).find((u) => u.name === id)); break;
       case 'proxy-upstream-delete':
@@ -2030,6 +2078,10 @@ document.addEventListener('submit', async (event) => {
       await api('/proxy/upstreams', { method: 'POST', body: { name: fd.get('name'), style: fd.get('style'), base_url: fd.get('base_url'), key_ref: String(fd.get('key_ref') || '').trim(), priority: Number(fd.get('priority')) || 100, models, headers, enabled: form.querySelector('[name="enabled"]').checked } });
       closeModal(); toast('🔀 Upstream saved'); await renderProxy();
     });
+  } else if (form.id === 'mcp-form') {
+    await run(async () => { await api('/mcp', { method: 'POST', body: { name: fd.get('name'), url: fd.get('url'), auth: fd.get('auth'), token_ref: String(fd.get('token_ref') || '').trim(), description: fd.get('description'), enabled: form.querySelector('[name="enabled"]').checked } }); closeModal(); toast('🔌 Server saved'); await renderMCP(); });
+  } else if (form.id === 'mcp-auth-form') {
+    await run(async () => { await api(`/mcp/${encodeURIComponent(form.dataset.name)}/auth/finish`, { method: 'POST', body: { redirect_url: fd.get('redirect_url') } }); closeModal(); toast('🔌 Connected'); await renderMCP(); });
   } else if (form.id === 'proxy-map-form') {
     await run(async () => { await api('/proxy/mappings', { method: 'POST', body: { alias: fd.get('alias'), upstream: fd.get('upstream'), model: fd.get('model') } }); toast('🔀 Alias mapped'); await renderProxy(); });
   } else if (form.id === 'proxy-key-form') {
@@ -2083,6 +2135,7 @@ async function route() {
     case 'deployments': return renderDeployments();
     case 'mail': return renderMail();
     case 'proxy': return renderProxy();
+    case 'mcp': return renderMCP();
     case 'access': return renderAccess();
     case 'vault': return renderVault();
     case 'audit': return renderAudit();

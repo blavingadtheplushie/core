@@ -28,16 +28,6 @@ func (d *Deps) tunnel() (*cloudflare.Client, string, error) {
 	return cf, id, nil
 }
 
-// tunnelService is where cloudflared reaches an app deployed with
-// deploy_docker: localhost when it runs next to Docker (LXC/VM install),
-// the container name when it is a sidecar on the deploy network.
-func (d *Deps) tunnelService(container string, hostPort, containerPort int) string {
-	if _, err := exec.LookPath("cloudflared"); err == nil {
-		return fmt.Sprintf("http://localhost:%d", hostPort)
-	}
-	return fmt.Sprintf("http://%s:%d", container, containerPort)
-}
-
 func registerTunnel(d *Deps) {
 	cfOK := func() bool { return cloudflare.New(d.Cfg).Configured() }
 

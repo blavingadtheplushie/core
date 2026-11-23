@@ -4,6 +4,7 @@
 package signal
 
 import (
+	"blavingad/internal/httpx"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -349,7 +350,7 @@ func receipt(ctx context.Context, to string, ts int64) {
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	c := &http.Client{Timeout: 10 * time.Second}
+	c := httpx.WithTimeout(10 * time.Second)
 	if resp, err := c.Do(req); err == nil {
 		resp.Body.Close()
 	}

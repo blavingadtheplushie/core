@@ -72,6 +72,7 @@ func RegisterAll(d *Deps) {
 	registerDiscord(d)
 	registerAsk(d)
 	registerProxy(d)
+	registerMCP(d)
 	LoadCustomTools(d)
 }
 

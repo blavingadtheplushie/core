@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"blavingad/internal/httpx"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -25,7 +26,7 @@ const discordTokenRef = "vault://DISCORD_BOT_TOKEN/password"
 
 var discordAPI = "https://discord.com/api/v10"
 
-var discordHTTP = &http.Client{Timeout: 60 * time.Second}
+var discordHTTP = httpx.Client
 
 // DiscordToken resolves the bot token (set by registerDiscord).
 var DiscordToken = func(ctx context.Context) (string, error) {

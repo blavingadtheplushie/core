@@ -611,7 +611,7 @@ func (b *Bot) Announce(channel, thread string, n core.Notice) {
 	if channel == "" || strings.HasPrefix(channel, "web") || strings.HasPrefix(channel, "signal:") || strings.HasPrefix(channel, "discord:") {
 		channel, thread = b.runner.Settings().HomeChannel, ""
 	}
-	if channel == "" {
+	if channel == "" || channel == "C0123ABCD" { // unset or .env.example placeholder
 		return
 	}
 	if _, err := b.Post(context.Background(), channel, thread, n); err != nil {

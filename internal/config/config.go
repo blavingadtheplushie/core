@@ -110,7 +110,7 @@ func Load() *Config {
 		SlackBotToken:    env("SLACK_BOT_TOKEN", ""),
 		SlackAppToken:    env("SLACK_APP_TOKEN", ""),
 		SlackAdmins:      list("SLACK_ADMINS"),
-		SlackHomeChannel: env("SLACK_HOME_CHANNEL", ""),
+		SlackHomeChannel: placeholderToEmpty(env("SLACK_HOME_CHANNEL", "")),
 
 		ExaAPIKey: env("EXA_API_KEY", ""),
 
@@ -300,4 +300,13 @@ func lower(items []string) []string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// placeholderToEmpty drops the .env.example placeholder channel ID (C0123ABCD),
+// which otherwise makes every announce fail with channel_not_found.
+func placeholderToEmpty(v string) string {
+	if v == "C0123ABCD" {
+		return ""
+	}
+	return v
 }

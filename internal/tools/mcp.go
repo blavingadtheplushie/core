@@ -150,7 +150,7 @@ func (d *Deps) mcpDescription() string { return d.mcpDescriptionFor(nil) }
 // mcpDescriptionFor lists only the servers the profile may use.
 func (d *Deps) mcpDescriptionFor(p *core.Profile) string {
 	var b strings.Builder
-	b.WriteString("Calls a remote MCP server (Streamable HTTP; auth and OAuth token refresh handled, tokens in the vault). Actions: servers (configured servers + status), list (server → its tools with schemas), call (server + tool + arguments), auth_start / auth_finish (OAuth: open the URL, paste back the 127.0.0.1 redirect URL), add (name, url, auth none|bearer|oauth, token_ref vault://…, description). Images returned by tools are saved under /workspace/mcp/<server>/. Servers:")
+	b.WriteString("Calls a remote MCP server (Streamable HTTP; auth and OAuth token refresh handled, tokens in the vault). Actions: servers (configured servers + status), list (server → its tools with schemas), call (server + tool + arguments), auth_start / auth_finish (OAuth: give the human the URL; it redirects to the admin dashboard, which captures the token by itself — auth_finish only when auth_start says to paste a 127.0.0.1 URL), add (name, url, auth none|bearer|oauth, token_ref vault://…, description). Images returned by tools are saved under /workspace/mcp/<server>/. Servers:")
 	n := 0
 	for _, s := range d.MCPServers() {
 		if !s.Enabled || s.Policy == "off" || !p.AllowsMCP(s.Name) {
@@ -293,9 +293,12 @@ func (d *Deps) registerMCPTool() {
 				if s.Auth != "oauth" {
 					return "", errors.New("this server does not use oauth")
 				}
-				u, err := c.AuthStart(ctx, s, a.ClientID, "", a.Scope, "")
+				u, redirect, err := c.AuthStart(ctx, s, a.ClientID, "", a.Scope, d.Cfg.PublicURL+mcp.CallbackPath)
 				if err != nil {
 					return "", err
+				}
+				if redirect != mcp.DefaultRedirect {
+					return "Open this URL and approve: you'll land back on the admin dashboard and " + s.Name + " gets connected automatically (nothing to paste):\n" + u, nil
 				}
 				return "Open this URL, approve, then give me the full 127.0.0.1 URL you land on (the page won't load, that's normal) for auth_finish:\n" + u, nil
 			case "auth_finish":

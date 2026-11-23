@@ -148,3 +148,29 @@ func TestCallPolicy(t *testing.T) {
 		t.Error("tool off must win")
 	}
 }
+
+func TestSetMCPAccess(t *testing.T) {
+	full := &Profile{Name: "member", Tools: []string{"*"}, Memory: "full"}
+	full.SetMCPAccess("hcb", false)
+	if full.AllowsMCP("hcb") || !full.AllowsMCP("figma") || !full.Allows(&Tool{Name: "mcp", Category: "mcp"}) {
+		t.Fatalf("revoke on full profile: %v", full.Tools)
+	}
+	full.SetMCPAccess("hcb", true)
+	if !full.AllowsMCP("hcb") || len(full.Tools) != 1 {
+		t.Fatalf("re-grant: %v", full.Tools)
+	}
+	guest := &Profile{Name: "guest", Tools: []string{"cat:web"}, Memory: "none"}
+	guest.SetMCPAccess("tricoteuses", true)
+	if !guest.AllowsMCP("tricoteuses") || guest.AllowsMCP("hcb") || guest.AllowsMCP("") {
+		t.Fatalf("grant on restricted profile: %v", guest.Tools)
+	}
+	guest.SetMCPAccess("tricoteuses", false)
+	if guest.Allows(&Tool{Name: "mcp", Category: "mcp"}) || len(guest.Tools) != 1 {
+		t.Fatalf("revoke last server should drop the mcp tool: %v", guest.Tools)
+	}
+	admin := &Profile{Name: "admin", Tools: []string{"*"}}
+	admin.SetMCPAccess("hcb", false)
+	if !admin.AllowsMCP("hcb") {
+		t.Fatal("admin must keep every server")
+	}
+}

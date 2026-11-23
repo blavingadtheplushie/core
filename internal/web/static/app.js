@@ -1394,8 +1394,8 @@ async function renderMCP() {
   const rows = d.servers || [];
   const st = (x) => x.status === 'connected' || x.status === 'public' || x.status.startsWith('bearer') ? badge(x.status, 'ok') : badge(x.status, 'warn');
   view.innerHTML = `${pageHead('MCP servers', 'Remote MCP servers it can call through the single <code>mcp</code> tool. Each server can override the tool policy (<strong>Inherit</strong> = same as <code>mcp</code> in Tools, currently <code>${esc(d.tool_policy || "?")}</code>), and access profiles can allow servers one by one (Access → profile → MCP). Tokens never live here: bearer tokens are <code>vault://</code> references, OAuth tokens are stored (and refreshed) in vault items <code>MCP_OAUTH_&lt;NAME&gt;</code>.', `<button class="btn primary" data-action="mcp-new">${icon('plus', 'btn-icon')} Server</button>`, 'Actions')}
-    <section class="card"><div class="card-body flush">${rows.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Name</th><th>URL</th><th>Auth</th><th>Status</th><th>Policy</th><th>Description</th><th></th></tr></thead><tbody>${rows.map((x) => { const s = x.server; return `<tr>
-      <td><div class="link-title">${esc(s.name)}</div>${s.enabled ? '' : badge('off', 'plain')}</td><td class="truncate-cell small mono">${esc(s.url)}</td><td class="small">${esc(s.auth)}${s.token_ref ? ` <code class="small">${esc(s.token_ref)}</code>` : ''}</td><td>${st(x)}</td><td><div class="segmented" role="group" aria-label="Policy for ${esc(s.name)}">${MCP_POLICIES.map(([p, l]) => `<button class="p-${p || 'inherit'} ${(s.policy || '') === p ? 'active' : ''}" data-action="mcp-policy" data-id="${esc(s.name)}" data-policy="${p}" title="${p ? '' : `Same as the mcp tool (${esc(d.tool_policy || 'approve')})`}">${l}</button>`).join('')}</div></td><td class="small">${esc(truncate(s.description || '', 120))}</td>
+    <section class="card"><div class="card-body flush">${rows.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Name</th><th>URL</th><th>Auth</th><th>Status</th><th>Policy</th><th>Profiles</th><th>Description</th><th></th></tr></thead><tbody>${rows.map((x) => { const s = x.server; return `<tr>
+      <td><div class="link-title">${esc(s.name)}</div>${s.enabled ? '' : badge('off', 'plain')}</td><td class="truncate-cell small mono">${esc(s.url)}</td><td class="small">${esc(s.auth)}${s.token_ref ? ` <code class="small">${esc(s.token_ref)}</code>` : ''}</td><td>${st(x)}</td><td><div class="segmented" role="group" aria-label="Policy for ${esc(s.name)}">${MCP_POLICIES.map(([p, l]) => `<button class="p-${p || 'inherit'} ${(s.policy || '') === p ? 'active' : ''}" data-action="mcp-policy" data-id="${esc(s.name)}" data-policy="${p}" title="${p ? '' : `Same as the mcp tool (${esc(d.tool_policy || 'approve')})`}">${l}</button>`).join('')}</div></td><td><div class="row wrap" style="gap:3px 10px;min-width:150px">${(x.access || []).map((p) => `<label class="check-row small" title="${p.locked ? 'Admin always has every server' : `Allow the ${esc(p.label)} profile to use ${esc(s.name)}`}"><input type="checkbox" data-action="mcp-access" data-id="${esc(s.name)}" data-profile="${esc(p.name)}" ${p.allowed ? 'checked' : ''} ${p.locked ? 'disabled' : ''}> ${esc(p.emoji)} ${esc(p.label)}</label>`).join('')}</div></td><td class="small">${esc(truncate(s.description || '', 120))}</td>
       <td class="actions"><div class="action-row"><button class="btn sm" data-action="mcp-test" data-id="${esc(s.name)}">Test</button>${s.auth === 'oauth' ? `<button class="btn sm" data-action="mcp-auth" data-id="${esc(s.name)}">Connect</button>` : ''}<button class="icon-btn" data-action="mcp-edit" data-id="${esc(s.name)}" aria-label="Edit" title="Edit">${icon('edit')}</button><button class="icon-btn danger" data-action="mcp-delete" data-id="${esc(s.name)}" aria-label="Delete" title="Delete">${icon('trash')}</button></div></td></tr>`; }).join('')}</tbody></table></div>` : emptyState('No MCP server', 'Add one with its URL: public, bearer token from the vault, or OAuth.', '<button class="btn primary" data-action="mcp-new">Add a server</button>')}</div></section>`;
 }
 
@@ -1416,7 +1416,8 @@ function mcpModal(s = null) {
 async function mcpAuth(name) {
   try {
     const res = await api(`/mcp/${encodeURIComponent(name)}/auth/start`, { method: 'POST', body: {} });
-    showModal(`${modalHead(`Connect ${name}`, 'Open the link, approve, then paste the 127.0.0.1 URL you land on (the page will not load, that is expected).')}
+    if (res.auto) { location.href = res.url; return; } // the provider sends us back to #/mcp, connected
+    showModal(`${modalHead(`Connect ${name}`, 'This server has no dynamic registration and its client only knows the loopback redirect: open the link, approve, then paste the 127.0.0.1 URL you land on (the page will not load, that is expected).')}
       <form id="mcp-auth-form" data-name="${esc(name)}"><div class="modal-body"><p><a class="btn" href="${esc(res.url)}" target="_blank" rel="noopener noreferrer">Open the authorization page</a></p>
       <div class="field"><label class="label" for="mcp-redirect">Redirect URL</label><input class="input mono" id="mcp-redirect" name="redirect_url" required placeholder="http://127.0.0.1:33418/callback?code=…"></div></div>
       <div class="modal-foot"><button class="btn" type="button" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Connect</button></div></form>`);
@@ -1968,6 +1969,13 @@ document.addEventListener('click', async (event) => {
         await renderMCP();
         break;
       }
+      case 'mcp-access': {
+        try {
+          await api(`/mcp/${encodeURIComponent(id)}/access`, { method: 'POST', body: { profile: target.dataset.profile, allow: target.checked } });
+          toast(`🔌 ${id} ${target.checked ? 'allowed for' : 'removed from'} ${target.dataset.profile}`);
+        } catch (error) { target.checked = !target.checked; toast(error.message, 'err'); }
+        break;
+      }
       case 'mcp-test': { try { const res = await api(`/mcp/${encodeURIComponent(id)}/test`, { method: 'POST' }); toast(`🔌 ${id}: ${res.tools.length} tools`); } catch (error) { toast(error.message, 'err'); } break; }
       case 'mcp-delete':
         confirmDialog({ title: `Delete ${id}?`, message: 'The server is removed from the list. Its vault items stay (delete them in the Vault page if needed).', confirm: 'Delete', onConfirm: async () => { await api(`/mcp/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast('Server deleted'); await renderMCP(); } });
@@ -2186,6 +2194,12 @@ async function init() {
     state.user = state.status.user;
     renderShell();
     connectEvents();
+    const qs = new URLSearchParams(location.search);
+    if (qs.has('mcp_connected') || qs.has('mcp_error')) {
+      const err = qs.get('mcp_error');
+      setTimeout(() => (err ? toast(err, 'err') : toast(`🔌 ${qs.get('mcp_connected')} connected`)), 300);
+      history.replaceState({}, '', location.pathname + (location.hash || '#/mcp'));
+    }
     if (!location.hash) history.replaceState({}, '', '#/');
     if (location.hash !== '#/') refreshOverview();
     await route();

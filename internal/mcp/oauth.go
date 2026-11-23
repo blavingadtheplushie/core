@@ -18,8 +18,21 @@ import (
 )
 
 // DefaultRedirect is a loopback URL: the browser fails to load it, and the
-// human pastes the final URL back (auth_finish).
+// human pastes the final URL back (auth_finish). Only used as a fallback for
+// servers without dynamic registration whose client was registered with it.
 const DefaultRedirect = "http://127.0.0.1:33418/callback"
+
+// CallbackPath is the dashboard route that receives OAuth redirects and
+// finishes the flow by itself (PUBLIC_URL + CallbackPath).
+const CallbackPath = "/api/mcp/oauth/callback"
+
+// ServerFromState extracts the server name encoded in an OAuth state.
+func ServerFromState(state string) string {
+	if i := strings.Index(state, "~"); i > 0 {
+		return state[:i]
+	}
+	return ""
+}
 
 func getJSON(ctx context.Context, u string, v any) error {
 	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
@@ -76,23 +89,29 @@ func randB64(n int) string {
 }
 
 // AuthStart registers a client if needed (dynamic registration) and
-// returns the URL the human must open. clientID/secret may be given.
-func (c *Client) AuthStart(ctx context.Context, s Server, clientID, clientSecret, scope, redirect string) (string, error) {
+// returns the URL the human must open, plus the redirect URI actually used
+// (the dashboard callback, or the loopback fallback for a pre-registered
+// client of a server without dynamic registration). clientID/secret may be given.
+func (c *Client) AuthStart(ctx context.Context, s Server, clientID, clientSecret, scope, redirect string) (string, string, error) {
 	if redirect == "" {
 		redirect = DefaultRedirect
 	}
 	m, err := discover(ctx, s.URL)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	st, _ := c.loadOAuth(ctx, s)
 	if clientID != "" {
 		st.ClientID, st.ClientSecret = clientID, clientSecret
 	}
+	reg, _ := m["registration_endpoint"].(string)
+	if reg == "" && st.ClientID != "" && st.RedirectURI != "" && st.RedirectURI != redirect {
+		// Can't register the new redirect: keep the one this client knows.
+		redirect = st.RedirectURI
+	}
 	if st.ClientID == "" || st.RedirectURI != redirect {
-		reg, _ := m["registration_endpoint"].(string)
 		if reg == "" {
-			return "", errors.New("this server has no dynamic registration: pass client_id (and client_secret)")
+			return "", "", errors.New("this server has no dynamic registration: pass client_id (and client_secret)")
 		}
 		body, _ := json.Marshal(map[string]any{"client_name": "blavingad", "redirect_uris": []string{redirect},
 			"grant_types": []string{"authorization_code", "refresh_token"}, "response_types": []string{"code"},
@@ -101,7 +120,7 @@ func (c *Client) AuthStart(ctx context.Context, s Server, clientID, clientSecret
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := httpx.Client.Do(req)
 		if err != nil {
-			return "", err
+			return "", "", err
 		}
 		b, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
@@ -110,14 +129,14 @@ func (c *Client) AuthStart(ctx context.Context, s Server, clientID, clientSecret
 			ClientSecret string `json:"client_secret"`
 		}
 		if resp.StatusCode >= 300 || json.Unmarshal(b, &r) != nil || r.ClientID == "" {
-			return "", fmt.Errorf("client registration refused: HTTP %d %.300s", resp.StatusCode, b)
+			return "", "", fmt.Errorf("client registration refused: HTTP %d %.300s", resp.StatusCode, b)
 		}
 		st.ClientID, st.ClientSecret = r.ClientID, r.ClientSecret
 	}
 	st.TokenEndpoint, _ = m["token_endpoint"].(string)
 	st.AuthEndpoint, _ = m["authorization_endpoint"].(string)
 	st.RedirectURI, st.Scope = redirect, scope
-	st.Verifier, st.State = randB64(48), randB64(24)
+	st.Verifier, st.State = randB64(48), s.Name+"~"+randB64(24)
 	sum := sha256.Sum256([]byte(st.Verifier))
 	q := url.Values{"response_type": {"code"}, "client_id": {st.ClientID}, "redirect_uri": {redirect}, "state": {st.State},
 		"code_challenge": {base64.RawURLEncoding.EncodeToString(sum[:])}, "code_challenge_method": {"S256"}, "resource": {s.URL}}
@@ -125,12 +144,13 @@ func (c *Client) AuthStart(ctx context.Context, s Server, clientID, clientSecret
 		q.Set("scope", scope)
 	}
 	if err := c.Store.SaveOAuth(ctx, s.OAuthItem(), st); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return st.AuthEndpoint + "?" + q.Encode(), nil
+	return st.AuthEndpoint + "?" + q.Encode(), redirect, nil
 }
 
-// AuthFinish exchanges the code found in the pasted redirect URL.
+// AuthFinish exchanges the code found in the redirect URL (pasted, or
+// received by the dashboard callback).
 func (c *Client) AuthFinish(ctx context.Context, s Server, redirected string) error {
 	st, err := c.loadOAuth(ctx, s)
 	if err != nil || st.Verifier == "" {

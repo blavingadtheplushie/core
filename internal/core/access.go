@@ -331,6 +331,36 @@ func (a *Access) RemoveMember(slackID string) error {
 }
 
 // AllowedMCP filters MCP server names down to the ones a profile may use.
+// SetMCPAccess grants or revokes one MCP server for the profile by
+// rewriting its tool tokens ("mcp:x" for a restricted profile, "-mcp:x" for
+// one with full MCP access). The admin profile always keeps everything.
+func (p *Profile) SetMCPAccess(server string, allow bool) {
+	server = strings.ToLower(strings.TrimSpace(server))
+	if server == "" || p.Name == "admin" || p.AllowsMCP(server) == allow {
+		return
+	}
+	drop := func(tok string) {
+		out := p.Tools[:0:0]
+		for _, t := range p.Tools {
+			if t != tok {
+				out = append(out, t)
+			}
+		}
+		p.Tools = out
+	}
+	if allow {
+		drop("-mcp:" + server)
+		if !p.AllowsMCP(server) {
+			p.Tools = append(p.Tools, "mcp:"+server)
+		}
+		return
+	}
+	drop("mcp:" + server)
+	if p.AllowsMCP(server) {
+		p.Tools = append(p.Tools, "-mcp:"+server)
+	}
+}
+
 func (p *Profile) AllowedMCP(servers []string) []string {
 	out := []string{}
 	for _, s := range servers {

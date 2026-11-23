@@ -20,6 +20,7 @@ import (
 	"blavingad/internal/core"
 	"blavingad/internal/llm"
 	"blavingad/internal/mail"
+	"blavingad/internal/mcp"
 	"blavingad/internal/memory"
 	"blavingad/internal/proxy"
 	"blavingad/internal/scheduler"
@@ -190,6 +191,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/mcp/{name}/test", a(s.testMCP))
 	mux.HandleFunc("POST /api/mcp/{name}/auth/start", a(s.mcpAuthStart))
 	mux.HandleFunc("POST /api/mcp/{name}/auth/finish", a(s.mcpAuthFinish))
+	mux.HandleFunc("GET "+mcp.CallbackPath, s.mcpOAuthCallback)
+	mux.HandleFunc("POST /api/mcp/{name}/access", a(s.setMCPAccess))
 
 	mux.HandleFunc("GET /api/access", a(s.getAccess))
 	mux.HandleFunc("PUT /api/access/default", a(s.setAccessDefault))
@@ -226,9 +229,18 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 		}
-		w.Header().Set("Cache-Control", "no-cache")
-		r.URL.Path = "/"
-		files.ServeHTTP(w, r)
+		// index.html with versioned asset URLs: Cloudflare's browser cache
+		// TTL overrides no-cache on app.js/styles.css, so bust it per build.
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		b, err := fs.ReadFile(sub, "index.html")
+		if err != nil {
+			http.Error(w, "index missing", 500)
+			return
+		}
+		v := url.QueryEscape(s.self.Version)
+		html := strings.NewReplacer(`src="/app.js"`, `src="/app.js?v=`+v+`"`, `href="/styles.css"`, `href="/styles.css?v=`+v+`"`).Replace(string(b))
+		w.Write([]byte(html))
 	})
 	return s.secureHeaders(mux)
 }

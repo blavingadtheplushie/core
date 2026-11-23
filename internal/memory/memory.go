@@ -52,11 +52,19 @@ func New(st *store.Store, client *llm.Client, embedModel string) *Service {
 
 func (s *Service) VectorsEnabled() bool { return s.llm != nil && s.model != "" }
 
+// queryEmbedTimeout caps the embedding call on the search path (recall runs
+// before every LLM turn): past it, search falls back to keyword-only.
+const queryEmbedTimeout = 2 * time.Second
+
 func (s *Service) embed(ctx context.Context, text string) []float32 {
+	return s.embedTimeout(ctx, text, 30*time.Second)
+}
+
+func (s *Service) embedTimeout(ctx context.Context, text string, timeout time.Duration) []float32 {
 	if !s.VectorsEnabled() {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	out, err := s.llm.Embed(ctx, s.model, []string{text})
 	if err != nil || len(out) == 0 {
@@ -334,7 +342,7 @@ func (s *Service) Search(ctx context.Context, query, kind string, limit int) []M
 		}
 	}
 
-	if vec := s.embed(ctx, query); vec != nil {
+	if vec := s.embedTimeout(ctx, query, queryEmbedTimeout); vec != nil {
 		s.loadVectors()
 		type pair struct {
 			id  int64

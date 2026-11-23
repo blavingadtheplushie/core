@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"testing"
 
 	"blavingad/internal/store"
@@ -102,5 +103,48 @@ func TestAccessResolve(t *testing.T) {
 	st.SetSetting("access.default_profile", "nexiste-pas")
 	if p, _ := a.Resolve("USTRANGER"); p.IsAdmin() || p.Memory != "none" {
 		t.Errorf("broken config must fail closed, got %+v", p)
+	}
+}
+
+func TestProfileAllowsMCP(t *testing.T) {
+	mcpTool := tool("mcp", "mcp")
+	all := &Profile{Tools: []string{"*", "-mcp:hcb"}, Memory: "full"}
+	if !all.Allows(mcpTool) || all.AllowsMCP("hcb") || !all.AllowsMCP("figma") || all.AllowsMCP("") {
+		t.Error("-mcp:x must hide one server only (and ad-hoc URLs)")
+	}
+	if !(&Profile{Tools: []string{"*"}}).AllowsMCP("") {
+		t.Error("full access allows ad-hoc URLs")
+	}
+	some := &Profile{Tools: []string{"web_search", "mcp:tricoteuses"}}
+	if !some.Allows(mcpTool) || !some.AllowsMCP("tricoteuses") || some.AllowsMCP("hcb") || some.AllowsMCP("") {
+		t.Error("mcp:x must grant the tool and that server only")
+	}
+	none := &Profile{Tools: []string{"*", "-mcp"}}
+	if none.Allows(mcpTool) || none.AllowsMCP("figma") {
+		t.Error("-mcp removes every server")
+	}
+	if (&Profile{Tools: []string{"web_search"}}).AllowsMCP("figma") {
+		t.Error("no mcp token, no server")
+	}
+	var sys *Profile
+	if !sys.AllowsMCP("hcb") {
+		t.Error("system runs see everything")
+	}
+}
+
+func TestCallPolicy(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Skip(err)
+	}
+	r := NewRegistry(st)
+	tl := &Tool{Name: "x", Risk: RiskSensitive, CallPolicy: func(a json.RawMessage) Policy { return Policy(string(a)) }}
+	r.Add(tl)
+	if r.CallPolicy(tl, json.RawMessage("")) != PolicyApprove || r.CallPolicy(tl, json.RawMessage("auto")) != PolicyAuto {
+		t.Error("per-call override")
+	}
+	r.SetPolicy("x", PolicyOff)
+	if r.CallPolicy(tl, json.RawMessage("auto")) != PolicyOff {
+		t.Error("tool off must win")
 	}
 }

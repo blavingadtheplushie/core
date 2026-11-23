@@ -58,6 +58,13 @@ func (d *Deps) SaveMCPServer(s mcp.Server) error {
 	default:
 		return errors.New("auth must be none, bearer or oauth")
 	}
+	switch s.Policy {
+	case "", "inherit":
+		s.Policy = ""
+	case "auto", "approve", "off":
+	default:
+		return errors.New("policy must be auto, approve, off or empty (same as the mcp tool)")
+	}
 	mcpMu.Lock()
 	defer mcpMu.Unlock()
 	list := d.MCPServers()
@@ -122,18 +129,38 @@ func (d *Deps) MCPClient() *mcp.Client {
 	return &mcp.Client{Store: vaultMCPStore{d.Vault}, ImgDir: filepath.Join(d.Cfg.WorkspaceDir, "mcp")}
 }
 
-func (d *Deps) mcpDescription() string {
+// mcpPolicy is the per-server policy override of one mcp call ("" = tool policy).
+func (d *Deps) mcpPolicy(args json.RawMessage) core.Policy {
+	name := field(args, "server")
+	if name == "" || strings.HasPrefix(name, "http") {
+		return ""
+	}
+	s, ok := d.mcpServer(name)
+	if !ok {
+		return ""
+	}
+	if !s.Enabled {
+		return core.PolicyOff
+	}
+	return core.Policy(s.Policy)
+}
+
+func (d *Deps) mcpDescription() string { return d.mcpDescriptionFor(nil) }
+
+// mcpDescriptionFor lists only the servers the profile may use.
+func (d *Deps) mcpDescriptionFor(p *core.Profile) string {
 	var b strings.Builder
 	b.WriteString("Calls a remote MCP server (Streamable HTTP; auth and OAuth token refresh handled, tokens in the vault). Actions: servers (configured servers + status), list (server → its tools with schemas), call (server + tool + arguments), auth_start / auth_finish (OAuth: open the URL, paste back the 127.0.0.1 redirect URL), add (name, url, auth none|bearer|oauth, token_ref vault://…, description). Images returned by tools are saved under /workspace/mcp/<server>/. Servers:")
-	list := d.MCPServers()
-	if len(list) == 0 {
-		b.WriteString(" none yet.")
-	}
-	for _, s := range list {
-		if !s.Enabled {
+	n := 0
+	for _, s := range d.MCPServers() {
+		if !s.Enabled || s.Policy == "off" || !p.AllowsMCP(s.Name) {
 			continue
 		}
+		n++
 		fmt.Fprintf(&b, "\n• %s: %s", s.Name, s.Description)
+	}
+	if n == 0 {
+		b.WriteString(" none available.")
 	}
 	return b.String()
 }
@@ -147,6 +174,8 @@ func (d *Deps) registerMCPTool() {
 	d.Reg.Add(&core.Tool{
 		Name: "mcp", Category: "mcp", Emoji: "🔌", Risk: core.RiskSensitive,
 		Description: d.mcpDescription(),
+		DescribeFor: d.mcpDescriptionFor,
+		CallPolicy:  d.mcpPolicy,
 		Params: core.Obj(map[string]any{
 			"action":       core.Enum("Action.", "servers", "list", "call", "auth_start", "auth_finish", "add"),
 			"server":       core.Str("Server name (see servers), or a raw https URL for a public server."),
@@ -158,6 +187,7 @@ func (d *Deps) registerMCPTool() {
 			"auth":         core.Enum("add: auth mode.", "none", "bearer", "oauth"),
 			"token_ref":    core.Str("add (bearer): vault://Item/field."),
 			"description":  core.Str("add: one line, what it is for and its privacy rules."),
+			"policy":       core.Enum("add: per-server policy (empty = same as the mcp tool).", "auto", "approve", "off"),
 			"client_id":    core.Str("auth_start: OAuth client id if the server has no dynamic registration (optional)."),
 			"scope":        core.Str("auth_start: OAuth scope (optional)."),
 		}, "action"),
@@ -170,7 +200,7 @@ func (d *Deps) registerMCPTool() {
 		},
 		Handler: func(ctx context.Context, rc *core.RunContext, args json.RawMessage) (string, error) {
 			a, err := core.Parse[struct {
-				Action, Server, Tool, URL, Auth, Description, Scope string
+				Action, Server, Tool, URL, Auth, Description, Scope, Policy string
 				RedirectURL                                         string         `json:"redirect_url"`
 				TokenRef                                            string         `json:"token_ref"`
 				ClientID                                            string         `json:"client_id"`
@@ -187,7 +217,14 @@ func (d *Deps) registerMCPTool() {
 			if a.Action == "servers" {
 				var b strings.Builder
 				for _, s := range d.MCPServers() {
-					fmt.Fprintf(&b, "- %s (%s, auth %s, %s, enabled=%v): %s\n", s.Name, s.URL, s.Auth, c.Status(ctx, s), s.Enabled, s.Description)
+					if !rc.Profile.AllowsMCP(s.Name) {
+						continue
+					}
+					pol := s.Policy
+					if pol == "" {
+						pol = "same as mcp tool"
+					}
+					fmt.Fprintf(&b, "- %s (%s, auth %s, %s, enabled=%v, policy %s): %s\n", s.Name, s.URL, s.Auth, c.Status(ctx, s), s.Enabled, pol, s.Description)
 				}
 				if b.Len() == 0 {
 					return "no MCP server configured (dashboard → MCP, or action=add)", nil
@@ -195,7 +232,10 @@ func (d *Deps) registerMCPTool() {
 				return b.String(), nil
 			}
 			if a.Action == "add" {
-				s := mcp.Server{Name: a.Server, URL: a.URL, Auth: a.Auth, TokenRef: a.TokenRef, Description: a.Description, Enabled: true}
+				if !rc.Profile.AllowsMCP("") {
+					return "", errors.New("adding MCP servers needs full MCP access in your access profile")
+				}
+				s := mcp.Server{Name: a.Server, URL: a.URL, Auth: a.Auth, TokenRef: a.TokenRef, Description: a.Description, Enabled: true, Policy: a.Policy}
 				if err := d.SaveMCPServer(s); err != nil {
 					return "", err
 				}
@@ -204,11 +244,17 @@ func (d *Deps) registerMCPTool() {
 			}
 			var s mcp.Server
 			if strings.HasPrefix(a.Server, "https://") || strings.HasPrefix(a.Server, "http://") {
+				if !rc.Profile.AllowsMCP("") {
+					return "", errors.New("ad-hoc MCP URLs are not allowed for this access profile")
+				}
 				s = mcp.Server{Name: "adhoc", URL: a.Server, Auth: "none", Enabled: true}
 			} else {
 				var ok bool
-				if s, ok = d.mcpServer(a.Server); !ok {
+				if s, ok = d.mcpServer(a.Server); !ok || !rc.Profile.AllowsMCP(s.Name) {
 					return "", fmt.Errorf("unknown MCP server %q (action=servers lists them)", a.Server)
+				}
+				if s.Policy == "off" {
+					return "", errors.New("this server is switched off by an admin")
 				}
 				if !s.Enabled {
 					return "", errors.New("this server is disabled in the dashboard")

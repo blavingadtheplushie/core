@@ -117,6 +117,11 @@ The profile filters the tool definitions sent to the model, is re-checked in
 `read`/`none` disable reflection and memory-writing tools), adds a prompt
 section, and decides approval rights (`any` / `own` / `none`).
 Tool tokens: `*`, `cat:<category>`, `<tool_name>`, `-<token>` to exclude.
+MCP servers are filtered per profile too: `mcp:<server>` grants the `mcp` tool
+for that server only, `-mcp:<server>` hides one server (`Profile.AllowsMCP`,
+checked in the mcp handler and in `Tool.DescribeFor`). Ad-hoc URLs and `add`
+need full MCP access. Each server also has its own `policy` (auto / approve /
+off, empty = inherit the `mcp` tool policy) applied through `Tool.CallPolicy`.
 
 ## 4. Adding a tool
 

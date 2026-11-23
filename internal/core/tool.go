@@ -48,6 +48,12 @@ type Tool struct {
 	// commands or GET requests skip the prompt). Only consulted when the
 	// effective policy is "approve".
 	NeedsApproval func(args json.RawMessage) bool
+	// CallPolicy overrides the tool policy for one call (e.g. per MCP
+	// server). Empty = use the tool policy.
+	CallPolicy func(args json.RawMessage) Policy
+	// DescribeFor renders the description for one run (e.g. only the MCP
+	// servers this profile may use). Nil = Description.
+	DescribeFor func(p *Profile) string
 	// Summarize renders a short human label for progress/approval UIs.
 	Summarize func(args json.RawMessage) string
 	Handler   func(ctx context.Context, rc *RunContext, args json.RawMessage) (string, error)
@@ -187,9 +193,27 @@ func (r *Registry) SetPolicy(name string, p Policy) error {
 	return r.st.SetSetting("policy."+name, string(p))
 }
 
+// CallPolicy is the effective policy of one call: the tool's CallPolicy
+// when it decides, else the tool policy. A tool switched off stays off.
+func (r *Registry) CallPolicy(t *Tool, args json.RawMessage) Policy {
+	p := r.Policy(t)
+	if p == PolicyOff || t.CallPolicy == nil {
+		return p
+	}
+	if cp := t.CallPolicy(args); cp != "" {
+		return cp
+	}
+	return p
+}
+
 // Definitions returns the OpenAI tool schema for every enabled, available
 // tool, optionally restricted to an allowlist.
 func (r *Registry) Definitions(allow map[string]bool, deny map[string]bool) []llm.ToolDef {
+	return r.DefinitionsFor(nil, allow, deny)
+}
+
+// DefinitionsFor is Definitions with per-profile descriptions.
+func (r *Registry) DefinitionsFor(prof *Profile, allow map[string]bool, deny map[string]bool) []llm.ToolDef {
 	var defs []llm.ToolDef
 	for _, t := range r.All() {
 		if !t.IsAvailable() || r.Policy(t) == PolicyOff {
@@ -202,6 +226,9 @@ func (r *Registry) Definitions(allow map[string]bool, deny map[string]bool) []ll
 			continue
 		}
 		desc := t.Description
+		if t.DescribeFor != nil {
+			desc = t.DescribeFor(prof)
+		}
 		if r.Policy(t) == PolicyApprove {
 			desc += " (⚠️ requires human approval)"
 		}

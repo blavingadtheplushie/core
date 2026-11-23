@@ -1102,6 +1102,7 @@ const CATEGORIES = {
   email: ['📬', 'Email'], deploy: ['🚀', 'Deployment'], self: ['🧬', 'Self-improvement'], system: ['⚙️', 'System'], access: ['🛂', 'Access'], vault: ['🔐', 'Vault'], audio: ['🗣️', 'Audio'], signal: ['📡', 'Signal'], mcp: ['🔌', 'MCP'], discord: ['🎮', 'Discord'], custom: ['🧩', 'Agent-created'],
 };
 const POLICIES = [['auto', 'Auto'], ['approve', 'Approve'], ['off', 'Off']];
+const MCP_POLICIES = [['', 'Inherit'], ['auto', 'Auto'], ['approve', 'Approve'], ['off', 'Off']];
 
 async function renderTools() {
   const seq = ++state.routeSeq;
@@ -1392,14 +1393,14 @@ async function renderMCP() {
   state.cache.mcp = d;
   const rows = d.servers || [];
   const st = (x) => x.status === 'connected' || x.status === 'public' || x.status.startsWith('bearer') ? badge(x.status, 'ok') : badge(x.status, 'warn');
-  view.innerHTML = `${pageHead('MCP servers', 'Remote MCP servers it can call through the single <code>mcp</code> tool. Tokens never live here: bearer tokens are <code>vault://</code> references, OAuth tokens are stored (and refreshed) in vault items <code>MCP_OAUTH_&lt;NAME&gt;</code>.', `<button class="btn primary" data-action="mcp-new">${icon('plus', 'btn-icon')} Server</button>`, 'Actions')}
-    <section class="card"><div class="card-body flush">${rows.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Name</th><th>URL</th><th>Auth</th><th>Status</th><th>Description</th><th></th></tr></thead><tbody>${rows.map((x) => { const s = x.server; return `<tr>
-      <td><div class="link-title">${esc(s.name)}</div>${s.enabled ? '' : badge('off', 'plain')}</td><td class="truncate-cell small mono">${esc(s.url)}</td><td class="small">${esc(s.auth)}${s.token_ref ? ` <code class="small">${esc(s.token_ref)}</code>` : ''}</td><td>${st(x)}</td><td class="small">${esc(truncate(s.description || '', 120))}</td>
+  view.innerHTML = `${pageHead('MCP servers', 'Remote MCP servers it can call through the single <code>mcp</code> tool. Each server can override the tool policy (<strong>Inherit</strong> = same as <code>mcp</code> in Tools, currently <code>${esc(d.tool_policy || "?")}</code>), and access profiles can allow servers one by one (Access → profile → MCP). Tokens never live here: bearer tokens are <code>vault://</code> references, OAuth tokens are stored (and refreshed) in vault items <code>MCP_OAUTH_&lt;NAME&gt;</code>.', `<button class="btn primary" data-action="mcp-new">${icon('plus', 'btn-icon')} Server</button>`, 'Actions')}
+    <section class="card"><div class="card-body flush">${rows.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Name</th><th>URL</th><th>Auth</th><th>Status</th><th>Policy</th><th>Description</th><th></th></tr></thead><tbody>${rows.map((x) => { const s = x.server; return `<tr>
+      <td><div class="link-title">${esc(s.name)}</div>${s.enabled ? '' : badge('off', 'plain')}</td><td class="truncate-cell small mono">${esc(s.url)}</td><td class="small">${esc(s.auth)}${s.token_ref ? ` <code class="small">${esc(s.token_ref)}</code>` : ''}</td><td>${st(x)}</td><td><div class="segmented" role="group" aria-label="Policy for ${esc(s.name)}">${MCP_POLICIES.map(([p, l]) => `<button class="p-${p || 'inherit'} ${(s.policy || '') === p ? 'active' : ''}" data-action="mcp-policy" data-id="${esc(s.name)}" data-policy="${p}" title="${p ? '' : `Same as the mcp tool (${esc(d.tool_policy || 'approve')})`}">${l}</button>`).join('')}</div></td><td class="small">${esc(truncate(s.description || '', 120))}</td>
       <td class="actions"><div class="action-row"><button class="btn sm" data-action="mcp-test" data-id="${esc(s.name)}">Test</button>${s.auth === 'oauth' ? `<button class="btn sm" data-action="mcp-auth" data-id="${esc(s.name)}">Connect</button>` : ''}<button class="icon-btn" data-action="mcp-edit" data-id="${esc(s.name)}" aria-label="Edit" title="Edit">${icon('edit')}</button><button class="icon-btn danger" data-action="mcp-delete" data-id="${esc(s.name)}" aria-label="Delete" title="Delete">${icon('trash')}</button></div></td></tr>`; }).join('')}</tbody></table></div>` : emptyState('No MCP server', 'Add one with its URL: public, bearer token from the vault, or OAuth.', '<button class="btn primary" data-action="mcp-new">Add a server</button>')}</div></section>`;
 }
 
 function mcpModal(s = null) {
-  const v = s || { name: '', url: '', auth: 'none', token_ref: '', description: '', enabled: true };
+  const v = s || { name: '', url: '', auth: 'none', token_ref: '', description: '', enabled: true, policy: '' };
   showModal(`${modalHead(s ? `Edit ${s.name}` : 'New MCP server', 'Streamable HTTP endpoint (usually ends with /mcp).')}
     <form id="mcp-form"><div class="modal-body"><div class="form-grid">
       <div class="field"><label class="label" for="mcp-name">Name</label><input class="input mono" id="mcp-name" name="name" value="${esc(v.name)}" ${s ? 'readonly' : ''} required placeholder="e.g. notion"></div>
@@ -1407,6 +1408,7 @@ function mcpModal(s = null) {
       <div class="field"><label class="label" for="mcp-auth">Auth</label><select class="select" id="mcp-auth" name="auth">${['none', 'bearer', 'oauth'].map((a) => `<option value="${a}" ${v.auth === a ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
       <div class="field"><label class="label" for="mcp-token">Token reference <span class="hint-inline">bearer only, vault://Item/field</span></label><input class="input mono" id="mcp-token" name="token_ref" value="${esc(v.token_ref || '')}" placeholder="vault://NOTION_TOKEN"></div>
       <div class="field"><label class="label" for="mcp-desc">Description <span class="hint-inline">shown to the agent: what it is for, privacy rules</span></label><textarea class="input" id="mcp-desc" name="description" rows="3">${esc(v.description || '')}</textarea></div>
+      <div class="field"><label class="label" for="mcp-policy">Policy <span class="hint-inline">overrides the mcp tool policy for this server</span></label><select class="select" id="mcp-policy" name="policy">${MCP_POLICIES.map(([p, l]) => `<option value="${p}" ${(v.policy || '') === p ? 'selected' : ''}>${l}${p ? '' : ' (same as the mcp tool)'}</option>`).join('')}</select></div>
       <label class="check-row"><input type="checkbox" name="enabled" ${v.enabled ? 'checked' : ''}> Enabled</label>
     </div></div><div class="modal-foot"><button class="btn" type="button" data-action="close-modal">Cancel</button><button class="btn primary" type="submit">Save</button></div></form>`);
 }
@@ -1707,7 +1709,7 @@ async function renderAccess() {
   if (seq !== state.routeSeq) return;
   state.cache.access = data;
   const name = state.status?.agentName || 'BLAVINGAD';
-  const profiles = data.profiles.map((p) => ({ ...p.profile, resolved: p.resolved }));
+  const profiles = data.profiles.map((p) => ({ ...p.profile, resolved: p.resolved, mcp: p.mcp, mcp_full: p.mcp_full }));
   const byName = Object.fromEntries(profiles.map((p) => [p.name, p]));
   const def = byName[data.default];
   const profileOptions = (selected, allowAdmin = true) => profiles.filter((p) => allowAdmin || p.name !== 'admin').map((p) => `<option value="${esc(p.name)}" ${p.name === selected ? 'selected' : ''}>${esc(p.emoji)} ${esc(p.label)}</option>`).join('');
@@ -1741,6 +1743,7 @@ async function renderAccess() {
         <div class="top"><div class="big emoji">${esc(p.emoji || '•')}</div><div style="min-width:0;flex:1"><h3>${esc(p.label)}</h3><div class="tiny muted mono">${esc(p.name)}${p.name === data.default ? ' · default' : ''}</div></div>${badge(`${fmtNum(p.members)} member${p.members === 1 ? '' : 's'}`, '', false)}</div>
         <p class="small muted">${esc(p.description || '—')}</p>
         <div class="row wrap" style="gap:5px">${p.reply ? `${badge(`${MEMORY_MODES[p.memory]?.[0] || ''} memory: ${(MEMORY_MODES[p.memory]?.[1] || p.memory).toLowerCase()}`, p.memory === 'full' ? 'ok' : p.memory === 'read' ? 'info' : '', false)}${badge(APPROVE_MODES[p.approve] || p.approve, p.approve === 'any' ? 'acc' : '', false)}${p.max_iterations ? badge(`≤ ${p.max_iterations} steps`, '', false) : ''}` : badge('🙈 ignored', 'bad', false)}</div>
+        ${p.reply && (data.mcp_servers || []).length && p.resolved.includes('mcp') ? `<div class="tiny muted">🔌 MCP: ${p.mcp_full && p.mcp.length === data.mcp_servers.length ? 'all servers' : esc((p.mcp || []).join(', ') || 'none')}</div>` : ''}
         ${p.reply ? `<div class="tiny muted">${p.resolved.length === state.cache.access.tools.length ? 'All tools' : `${fmtNum(p.resolved.length)} tool${p.resolved.length === 1 ? '' : 's'}: ${esc(p.resolved.slice(0, 8).join(', '))}${p.resolved.length > 8 ? ` +${p.resolved.length - 8}` : ''}`}</div>` : ''}
         <div class="row" style="margin-top:2px"><button class="btn xs" data-action="edit-profile" data-name="${esc(p.name)}">${icon('edit', 'btn-icon')} Edit</button>${p.builtin ? '<span class="tiny muted">🔒 built-in</span>' : `<button class="btn xs ghost" data-action="delete-profile" data-name="${esc(p.name)}">${icon('trash', 'btn-icon')} Delete</button>`}</div>
       </section>`).join('')}</div>`;
@@ -1752,6 +1755,7 @@ function profileModal(name = '') {
     || { name: '', label: '', emoji: '🙂', description: '', tools: ['cat:web'], memory: 'none', reply: true, approve: 'none', max_iterations: 0, extra_prompt: '', resolved: data.tools.filter((t) => t.category === 'web').map((t) => t.name) };
   const isAdmin = p.name === 'admin';
   const allowed = new Set(p.resolved);
+  const mcpAllowed = new Set(name ? (data.profiles.find((x) => x.profile.name === name)?.mcp || []) : (data.mcp_servers || []).map((x) => x.name));
   const groups = {};
   for (const t of data.tools) (groups[t.category] ||= []).push(t);
   const cats = Object.keys(CATEGORIES).filter((k) => groups[k]).concat(Object.keys(groups).filter((k) => !CATEGORIES[k]));
@@ -1769,8 +1773,10 @@ function profileModal(name = '') {
         <div class="stack-sm">${cats.map((c) => {
           const list = groups[c];
           const all = list.every((t) => allowed.has(t.name));
+          const servers = c === 'mcp' ? (data.mcp_servers || []) : [];
           return `<div class="rule-card" style="gap:8px"><label class="check-row" style="font-weight:600"><input type="checkbox" data-cat-toggle="${esc(c)}" ${all ? 'checked' : ''}> <span class="emoji">${(CATEGORIES[c] || ['🔧'])[0]}</span> ${esc((CATEGORIES[c] || ['', c])[1])} <span class="tiny muted" style="font-weight:400">— whole category</span></label>
-            <div class="row wrap" style="gap:4px 14px;padding-left:23px">${list.map((t) => `<label class="check-row" title="${t.available ? '' : 'Integration not configured'}"><input type="checkbox" name="tool" value="${esc(t.name)}" data-cat="${esc(c)}" ${allowed.has(t.name) ? 'checked' : ''}> <code class="small${t.available ? '' : ' muted'}">${esc(t.name)}</code>${t.sensitive ? ' <span title="Sensitive: approval required by default">⚠️</span>' : ''}</label>`).join('')}</div></div>`;
+            <div class="row wrap" style="gap:4px 14px;padding-left:23px">${list.map((t) => `<label class="check-row" title="${t.available ? '' : 'Integration not configured'}"><input type="checkbox" name="tool" value="${esc(t.name)}" data-cat="${esc(c)}" ${allowed.has(t.name) ? 'checked' : ''}> <code class="small${t.available ? '' : ' muted'}">${esc(t.name)}</code>${t.sensitive ? ' <span title="Sensitive: approval required by default">⚠️</span>' : ''}</label>`).join('')}</div>
+            ${servers.length ? `<div style="padding-left:23px"><div class="tiny muted" style="margin-bottom:4px">Servers reachable through <code>mcp</code> <span title="Unchecked servers are hidden from this profile and refused at call time. Ad-hoc URLs need every server.">ⓘ</span></div><div class="row wrap" style="gap:4px 14px">${servers.map((sv) => `<label class="check-row" title="${esc(sv.description || '')}"><input type="checkbox" name="mcp_server" value="${esc(sv.name)}" ${mcpAllowed.has(sv.name) ? 'checked' : ''} ${allowed.has('mcp') ? '' : 'disabled'}> <code class="small${sv.enabled && sv.policy !== 'off' ? '' : ' muted'}">${esc(sv.name)}</code></label>`).join('')}</div></div>` : ''}</div>`;
         }).join('')}</div></div>`}
       <div class="field span-2"><label class="label" for="pf-extra">Instructions for this profile <span class="hint-inline">added to its prompt</span></label><textarea class="textarea" id="pf-extra" name="extra_prompt" placeholder="e.g. Only answer questions about our public product.">${esc(p.extra_prompt)}</textarea></div>
     </div></div>
@@ -1784,6 +1790,8 @@ function updateToolCount() {
   if (!form || !node) return;
   const boxes = [...form.querySelectorAll('input[name="tool"]')];
   node.textContent = `${boxes.filter((b) => b.checked).length} / ${boxes.length}`;
+  const mcpOn = !!form.querySelector('input[name="tool"][value="mcp"]')?.checked;
+  form.querySelectorAll('input[name="mcp_server"]').forEach((b) => { b.disabled = !mcpOn; });
   form.querySelectorAll('[data-cat-toggle]').forEach((cat) => {
     const inCat = boxes.filter((b) => b.dataset.cat === cat.dataset.catToggle);
     const on = inCat.filter((b) => b.checked).length;
@@ -1802,6 +1810,18 @@ function toolTokens(form) {
     const inCat = boxes.filter((b) => b.dataset.cat === c);
     if (inCat.every((b) => b.checked)) tokens.push(`cat:${c}`);
     else inCat.filter((b) => b.checked).forEach((b) => tokens.push(b.value));
+  }
+  // MCP servers: "-mcp:x" when the profile has every tool, otherwise
+  // "mcp:x" for each allowed server (safer: new servers stay hidden).
+  const mcpOn = !!form.querySelector('input[name="tool"][value="mcp"]')?.checked;
+  const srv = [...form.querySelectorAll('input[name="mcp_server"]')];
+  if (mcpOn && srv.length && !srv.every((b) => b.checked)) {
+    if (tokens.includes('*')) srv.filter((b) => !b.checked).forEach((b) => tokens.push(`-mcp:${b.value}`));
+    else {
+      const kept = tokens.filter((t) => t !== 'mcp' && t !== 'cat:mcp');
+      srv.filter((b) => b.checked).forEach((b) => kept.push(`mcp:${b.value}`));
+      return kept;
+    }
   }
   return tokens;
 }
@@ -1940,6 +1960,14 @@ document.addEventListener('click', async (event) => {
       case 'mcp-new': mcpModal(); break;
       case 'mcp-edit': mcpModal((state.cache.mcp?.servers || []).map((x) => x.server).find((x) => x.name === id)); break;
       case 'mcp-auth': await mcpAuth(id); break;
+      case 'mcp-policy': {
+        const sv = (state.cache.mcp?.servers || []).map((x) => x.server).find((x) => x.name === id);
+        if (!sv) break;
+        await api('/mcp', { method: 'POST', body: { ...sv, policy: target.dataset.policy } });
+        toast(`🔌 ${id} → ${({ '': 'same as the mcp tool', auto: 'auto', approve: 'approval required', off: 'disabled' })[target.dataset.policy]}`);
+        await renderMCP();
+        break;
+      }
       case 'mcp-test': { try { const res = await api(`/mcp/${encodeURIComponent(id)}/test`, { method: 'POST' }); toast(`🔌 ${id}: ${res.tools.length} tools`); } catch (error) { toast(error.message, 'err'); } break; }
       case 'mcp-delete':
         confirmDialog({ title: `Delete ${id}?`, message: 'The server is removed from the list. Its vault items stay (delete them in the Vault page if needed).', confirm: 'Delete', onConfirm: async () => { await api(`/mcp/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast('Server deleted'); await renderMCP(); } });
@@ -2079,7 +2107,7 @@ document.addEventListener('submit', async (event) => {
       closeModal(); toast('🔀 Upstream saved'); await renderProxy();
     });
   } else if (form.id === 'mcp-form') {
-    await run(async () => { await api('/mcp', { method: 'POST', body: { name: fd.get('name'), url: fd.get('url'), auth: fd.get('auth'), token_ref: String(fd.get('token_ref') || '').trim(), description: fd.get('description'), enabled: form.querySelector('[name="enabled"]').checked } }); closeModal(); toast('🔌 Server saved'); await renderMCP(); });
+    await run(async () => { await api('/mcp', { method: 'POST', body: { name: fd.get('name'), url: fd.get('url'), auth: fd.get('auth'), token_ref: String(fd.get('token_ref') || '').trim(), description: fd.get('description'), policy: fd.get('policy') || '', enabled: form.querySelector('[name="enabled"]').checked } }); closeModal(); toast('🔌 Server saved'); await renderMCP(); });
   } else if (form.id === 'mcp-auth-form') {
     await run(async () => { await api(`/mcp/${encodeURIComponent(form.dataset.name)}/auth/finish`, { method: 'POST', body: { redirect_url: fd.get('redirect_url') } }); closeModal(); toast('🔌 Connected'); await renderMCP(); });
   } else if (form.id === 'proxy-map-form') {

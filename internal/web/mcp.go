@@ -32,7 +32,11 @@ func (s *Server) listMCP(w http.ResponseWriter, r *http.Request) {
 	for _, sv := range m.MCPServers() {
 		out = append(out, map[string]any{"server": sv, "status": c.Status(r.Context(), sv)})
 	}
-	writeJSON(w, 200, map[string]any{"servers": out, "redirect": mcp.DefaultRedirect})
+	toolPolicy := ""
+	if t, ok := s.reg.Get("mcp"); ok {
+		toolPolicy = string(s.reg.Policy(t))
+	}
+	writeJSON(w, 200, map[string]any{"servers": out, "redirect": mcp.DefaultRedirect, "tool_policy": toolPolicy})
 }
 
 func (s *Server) saveMCP(w http.ResponseWriter, r *http.Request) {
@@ -49,7 +53,7 @@ func (s *Server) saveMCP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	s.st.Audit(actor(r), "mcp.server_save", sv.Name, map[string]string{"url": sv.URL, "auth": sv.Auth, "token_ref": sv.TokenRef})
+	s.st.Audit(actor(r), "mcp.server_save", sv.Name, map[string]string{"url": sv.URL, "auth": sv.Auth, "token_ref": sv.TokenRef, "policy": sv.Policy})
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 

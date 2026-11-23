@@ -17,7 +17,9 @@ import (
 //	"*"            every tool
 //	"cat:web"      every tool of a category
 //	"web_search"   one tool
-//	"-…"           exclusion (any of the forms above), wins over inclusions
+//	"mcp:notion"   one MCP server only (implies the mcp tool)
+//	"-…"           exclusion (any of the forms above), wins over inclusions;
+//	               "-mcp:hcb" hides one MCP server but keeps the mcp tool
 type Profile struct {
 	Name          string   `json:"name"`
 	Label         string   `json:"label"`
@@ -41,6 +43,8 @@ var (
 
 func matchToken(tok string, t *Tool) bool {
 	switch {
+	case strings.HasPrefix(tok, "mcp:"):
+		return t.Name == "mcp"
 	case tok == "*":
 		return true
 	case strings.HasPrefix(tok, "cat:"):
@@ -57,6 +61,9 @@ func (p *Profile) Allows(t *Tool) bool {
 	}
 	in := false
 	for _, tok := range p.Tools {
+		if strings.HasPrefix(tok, "-mcp:") {
+			continue // server-level exclusion, see AllowsMCP
+		}
 		if strings.HasPrefix(tok, "-") {
 			if matchToken(tok[1:], t) {
 				return false
@@ -75,6 +82,32 @@ func (p *Profile) Allows(t *Tool) bool {
 		return false
 	}
 	return true
+}
+
+// AllowsMCP tells whether the profile may use one MCP server through the
+// mcp tool. server == "" stands for an ad-hoc URL (or adding a server): only
+// profiles with full MCP access ("*", "cat:mcp" or "mcp") and no server
+// exclusion may do that.
+func (p *Profile) AllowsMCP(server string) bool {
+	if p == nil {
+		return true
+	}
+	if !p.Allows(&Tool{Name: "mcp", Category: "mcp"}) {
+		return false
+	}
+	server = strings.ToLower(server)
+	full, one := false, false
+	for _, tok := range p.Tools {
+		switch {
+		case strings.HasPrefix(tok, "-mcp:") && (server == "" || tok == "-mcp:"+server):
+			return false
+		case tok == "*" || tok == "cat:mcp" || tok == "mcp":
+			full = true
+		case server != "" && tok == "mcp:"+server:
+			one = true
+		}
+	}
+	return full || one
 }
 
 // CanApprove reports whether someone with this profile may decide an
@@ -295,6 +328,17 @@ func (a *Access) RemoveMember(slackID string) error {
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// AllowedMCP filters MCP server names down to the ones a profile may use.
+func (p *Profile) AllowedMCP(servers []string) []string {
+	out := []string{}
+	for _, s := range servers {
+		if p.AllowsMCP(s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // AllowedTools lists the tool names a profile resolves to.

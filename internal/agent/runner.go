@@ -344,7 +344,7 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 			rc.AutoApprove[t] = true
 		}
 	}
-	defs := r.reg.Definitions(rc.Allowed, nil)
+	defs := r.reg.DefinitionsFor(rc.Profile, rc.Allowed, nil)
 	r.recordContext(res.RunID, sysParts, defs, req)
 	if !prof.IsAdmin() {
 		r.step(res.RunID, "access", prof.Name, prof.Emoji+" "+prof.Label, fmt.Sprintf("%d tools allowed · memory %s", len(defs), prof.Memory), "ok", 0, 0)
@@ -543,8 +543,11 @@ func (r *Runner) execTools(ctx context.Context, rc *core.RunContext, calls []llm
 }
 
 func (r *Runner) needsApproval(t *core.Tool, args json.RawMessage) bool {
-	if r.reg.Policy(t) != core.PolicyApprove {
+	if r.reg.CallPolicy(t, args) != core.PolicyApprove {
 		return false
+	}
+	if t.CallPolicy != nil && t.CallPolicy(args) == core.PolicyApprove {
+		return true // an explicit per-call "approve" beats read-only refinements
 	}
 	return t.NeedsApproval == nil || t.NeedsApproval(args)
 }
@@ -581,9 +584,9 @@ func (r *Runner) execTool(ctx context.Context, rc *core.RunContext, tc llm.ToolC
 		progress(Progress{Kind: "tool_end", Tool: name, Emoji: t.Emoji, Label: label, Category: t.Category, OK: status == "ok", Text: clip(out, 1500), DurationMs: time.Since(start).Milliseconds(), Iteration: iter})
 	}()
 
-	if r.reg.Policy(t) == core.PolicyOff {
+	if r.reg.CallPolicy(t, args) == core.PolicyOff {
 		status = "error"
-		return "This tool has been disabled by an admin."
+		return "This tool (or this target, e.g. this MCP server) has been disabled by an admin."
 	}
 	if r.needsApproval(t, args) && !rc.AutoApprove[name] {
 		astart := time.Now()

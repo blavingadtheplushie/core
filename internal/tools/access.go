@@ -31,8 +31,16 @@ func (d *Deps) describeProfile(p core.Profile) string {
 		steps = fmt.Sprint(p.MaxIterations)
 	}
 	n := len(d.Access.AllowedTools(d.Reg, &p))
-	return fmt.Sprintf("%s %s [%s] — %s\n   tools: %s (%d effective) · memory: %s · approval: %s · max steps: %s · %s",
-		p.Emoji, p.Label, p.Name, p.Description, strings.Join(p.Tools, " "), n, p.Memory, p.Approve, steps, reply)
+	var names []string
+	for _, s := range d.MCPServers() {
+		names = append(names, s.Name)
+	}
+	mcps := strings.Join(p.AllowedMCP(names), ", ")
+	if mcps == "" {
+		mcps = "none"
+	}
+	return fmt.Sprintf("%s %s [%s] — %s\n   tools: %s (%d effective) · mcp servers: %s · memory: %s · approval: %s · max steps: %s · %s",
+		p.Emoji, p.Label, p.Name, p.Description, strings.Join(p.Tools, " "), n, mcps, p.Memory, p.Approve, steps, reply)
 }
 
 func registerAccess(d *Deps) {
@@ -68,7 +76,7 @@ func registerAccess(d *Deps) {
 			for _, m := range members {
 				fmt.Fprintf(&b, "- %s → %s%s\n", d.personLabel(m.SlackID), m.Profile, map[bool]string{true: " (SLACK_ADMINS)", false: ""}[m.EnvAdmin])
 			}
-			b.WriteString("\nTool syntax: \"*\" = everything, \"cat:web\" = a category (web, slack, memory, code, github, email, deploy, self, system, access, vault, custom), \"tool_name\", and \"-…\" to exclude.")
+			b.WriteString("\nTool syntax: \"*\" = everything, \"cat:web\" = a category (web, slack, memory, code, github, email, deploy, self, system, access, vault, mcp, custom), \"tool_name\", \"mcp:<server>\" = one MCP server only (implies the mcp tool), and \"-…\" to exclude (\"-mcp:hcb\" hides one MCP server).")
 			return b.String(), nil
 		},
 	})
@@ -161,7 +169,7 @@ func registerAccess(d *Deps) {
 			"label":          core.Str("Display name."),
 			"emoji":          core.Str("Emoji."),
 			"description":    core.Str("One sentence."),
-			"tools":          core.StrList("Tool tokens."),
+			"tools":          core.StrList("Tool tokens: *, cat:<category>, tool_name, mcp:<server> (one MCP server), -… to exclude (e.g. -mcp:hcb)."),
 			"memory":         core.Enum("Memory mode.", "full", "read", "none"),
 			"reply":          core.Bool("Reply to these people (false = ignored)."),
 			"approve":        core.Enum("Approval rights.", "any", "own", "none"),

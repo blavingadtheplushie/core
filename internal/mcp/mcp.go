@@ -32,6 +32,9 @@ type Server struct {
 	Auth     string `json:"auth"`
 	TokenRef string `json:"token_ref,omitempty"`
 	Enabled  bool   `json:"enabled"`
+	// Policy overrides the mcp tool policy for this server: auto | approve |
+	// off, empty = same as the mcp tool.
+	Policy string `json:"policy,omitempty"`
 }
 
 // OAuthItem is the vault item holding a server's OAuth state.

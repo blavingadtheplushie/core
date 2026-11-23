@@ -890,17 +890,25 @@ func (s *Server) listAudit(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getAccess(w http.ResponseWriter, r *http.Request) {
 	profiles := s.access.Profiles()
+	mcpNames := []string{}
+	mcpList := []map[string]any{}
+	if s.hooks.MCP != nil {
+		for _, sv := range s.hooks.MCP.MCPServers() {
+			mcpNames = append(mcpNames, sv.Name)
+			mcpList = append(mcpList, map[string]any{"name": sv.Name, "description": sv.Description, "enabled": sv.Enabled, "policy": sv.Policy})
+		}
+	}
 	out := make([]map[string]any, 0, len(profiles))
 	for i := range profiles {
 		p := profiles[i]
-		out = append(out, map[string]any{"profile": p, "resolved": s.access.AllowedTools(s.reg, &p)})
+		out = append(out, map[string]any{"profile": p, "resolved": s.access.AllowedTools(s.reg, &p), "mcp": p.AllowedMCP(mcpNames), "mcp_full": p.AllowsMCP("")})
 	}
 	var catalog []map[string]any
 	for _, t := range s.reg.All() {
 		catalog = append(catalog, map[string]any{"name": t.Name, "category": t.Category, "emoji": t.Emoji, "sensitive": t.Risk == core.RiskSensitive, "available": t.IsAvailable()})
 	}
 	people, _ := s.st.Rows(`SELECT slack_id, COALESCE(NULLIF(real_name,''), name, '') AS name FROM people ORDER BY message_count DESC LIMIT 500`)
-	writeJSON(w, 200, map[string]any{"profiles": out, "default": s.access.DefaultProfile(), "members": s.access.Members(), "tools": catalog, "people": people})
+	writeJSON(w, 200, map[string]any{"profiles": out, "default": s.access.DefaultProfile(), "members": s.access.Members(), "tools": catalog, "people": people, "mcp_servers": mcpList})
 }
 
 func (s *Server) setAccessDefault(w http.ResponseWriter, r *http.Request) {

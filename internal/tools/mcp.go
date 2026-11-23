@@ -177,7 +177,7 @@ func (d *Deps) registerMCPTool() {
 		DescribeFor: d.mcpDescriptionFor,
 		CallPolicy:  d.mcpPolicy,
 		Params: core.Obj(map[string]any{
-			"action":       core.Enum("Action.", "servers", "list", "call", "auth_start", "auth_finish", "add"),
+			"action":       core.Enum("Action.", "servers", "list", "call", "auth_start", "auth_finish", "add", "remove"),
 			"server":       core.Str("Server name (see servers), or a raw https URL for a public server."),
 			"tool":         core.Str("Remote tool name (call)."),
 			"arguments":    map[string]any{"type": "object", "description": "Remote tool arguments (call)."},
@@ -241,6 +241,16 @@ func (d *Deps) registerMCPTool() {
 				}
 				d.St.Audit(rc.Actor(), "mcp.server_save", s.Name, map[string]string{"url": s.URL, "auth": s.Auth})
 				return "saved server " + slugify(a.Server) + (map[bool]string{true: " — now run auth_start", false: ""}[a.Auth == "oauth"]), nil
+			}
+			if a.Action == "remove" {
+				if !rc.Profile.AllowsMCP("") {
+					return "", errors.New("removing MCP servers needs full MCP access in your access profile")
+				}
+				if err := d.DeleteMCPServer(a.Server); err != nil {
+					return "", err
+				}
+				d.St.Audit(rc.Actor(), "mcp.server_delete", a.Server, nil)
+				return "removed server " + a.Server + " (its vault token, if any, is left in place)", nil
 			}
 			var s mcp.Server
 			if strings.HasPrefix(a.Server, "https://") || strings.HasPrefix(a.Server, "http://") {

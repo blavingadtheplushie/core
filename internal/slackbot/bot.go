@@ -220,6 +220,11 @@ func (b *Bot) onMessage(ctx context.Context, ev *slackevents.MessageEvent) {
 	if isSelf || ev.User == "" {
 		return
 	}
+	if isIgnoredText(ev.Text) {
+		// "##" convention: messages starting with ## are not for bots,
+		// even when they mention us.
+		return
+	}
 	mentioned := strings.Contains(ev.Text, "<@"+b.BotUserID+">")
 	if ev.BotID != "" {
 		b.onBotMessage(ctx, ev, mentioned)
@@ -328,6 +333,13 @@ func (b *Bot) botStreak(channel, thread, ts string) int {
 		channel, thread, thread, ts, b.BotUserID, channel, thread, thread, ts)
 }
 
+// isIgnoredText reports whether a message uses the "##" convention: text
+// starting with ## (after whitespace) is meant for humans only, so bots must
+// not answer it nor use it as context.
+func isIgnoredText(text string) bool {
+	return strings.HasPrefix(strings.TrimSpace(text), "##")
+}
+
 func (b *Bot) cleanText(text string) string {
 	text = strings.ReplaceAll(text, "<@"+b.BotUserID+">", "@"+b.cfg.AgentName)
 	return strings.TrimSpace(text)
@@ -403,7 +415,7 @@ func (b *Bot) history(ctx context.Context, ev *slackevents.MessageEvent) []llm.M
 	}
 	var out []llm.Message
 	for _, m := range msgs {
-		if m.Timestamp == ev.TimeStamp || strings.TrimSpace(m.Text) == "" {
+		if m.Timestamp == ev.TimeStamp || strings.TrimSpace(m.Text) == "" || isIgnoredText(m.Text) {
 			continue
 		}
 		if m.User == b.BotUserID || (m.BotID != "" && m.BotID == b.BotID) {
@@ -451,6 +463,9 @@ func (b *Bot) recentChannel(ctx context.Context, channel, before string) string 
 	}
 	var lines []string
 	for i := len(rows) - 1; i >= 0; i-- {
+		if isIgnoredText(fmt.Sprint(rows[i]["text"])) {
+			continue
+		}
 		lines = append(lines, fmt.Sprintf("%v: %v", rows[i]["who"], textutil.Short(fmt.Sprint(rows[i]["text"]), 300)))
 	}
 	return "## Latest messages in this channel (context, not necessarily addressed to you)\n" + strings.Join(lines, "\n")

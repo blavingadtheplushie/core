@@ -85,7 +85,7 @@ Two ways to run it, same layout (`/data`, `/workspace`, seed in
 | `internal/cloudflare` | Cloudflare Tunnel API: tunnel lookup/creation, ingress routes (catch-all kept last), proxied DNS CNAMEs |
 | `internal/mcp` | The single MCP client: JSON/SSE JSON-RPC, sessions, bearer or OAuth (discovery, dynamic registration, PKCE, refresh on expiry/401), state in vault items `MCP_OAUTH_<NAME>`; servers configured in setting `mcp.servers` (dashboard `#/mcp`) |
 | `internal/httpx` | Shared outbound `http.Client` |
-| `internal/vault` | Vaultwarden through the Bitwarden CLI: unlock, in-memory cache, `vault://` references, env resolution, save/generate |
+| `internal/vault` | Vaultwarden through the Bitwarden CLI (persistent `bw serve` on a 0700 unix socket after unlock, `serve.go`; one-shot `bw` fallback, `VAULT_BW_SERVE=0` disables): unlock, in-memory cache, `vault://` references, env resolution, save/generate |
 | `internal/scheduler` | Cron / one-shot tasks |
 | `internal/selfupdate` | Supervisor, build/upgrade/rollback, git plumbing |
 | `internal/web` | HTTP server, OIDC + sessions, JSON API, SSE, embedded SPA in `static/` |

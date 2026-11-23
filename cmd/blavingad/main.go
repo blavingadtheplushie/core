@@ -364,6 +364,7 @@ func serve() int {
 	case <-ctx.Done():
 		slog.Info("shutting down")
 		runner.Wait(20 * time.Second)
+		vc.Close()
 		return 0
 	case err := <-webErr:
 		if err != nil {

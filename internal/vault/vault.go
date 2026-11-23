@@ -103,6 +103,7 @@ type Client struct {
 	lastSync time.Time
 	lastErr  string
 	opMu     sync.Mutex
+	serve    *serveProc // persistent `bw serve`, nil = one-shot CLI
 }
 
 // Collection is an organization collection the account can access.
@@ -122,15 +123,25 @@ func (c *Client) Folder() string { return c.cfg.Folder }
 
 // bw runs the CLI with a minimal environment: nothing from our own process
 // leaks into it, and the session/password never leak out of it.
-func (c *Client) bw(ctx context.Context, extraEnv []string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, c.cfg.Binary, args...)
+func (c *Client) baseEnv() []string {
 	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + c.cfg.DataDir, "BITWARDENCLI_APPDATA_DIR=" + c.cfg.DataDir,
 		"NODE_NO_WARNINGS=1", "BW_NOINTERACTION=true", "BW_NO_COLOR=true"}
 	if c.cfg.CACert != "" {
 		env = append(env, "NODE_EXTRA_CA_CERTS="+c.cfg.CACert)
 	}
+	return env
+}
+
+func (c *Client) bw(ctx context.Context, extraEnv []string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+	if extraEnv == nil {
+		if out, handled, err := c.viaServe(ctx, args); handled {
+			return out, err
+		}
+	}
+	cmd := exec.CommandContext(ctx, c.cfg.Binary, args...)
+	env := c.baseEnv()
 	c.mu.RLock()
 	if c.session != "" {
 		env = append(env, "BW_SESSION="+c.session)
@@ -207,6 +218,8 @@ func (c *Client) Open(ctx context.Context) error {
 	if err := os.MkdirAll(c.cfg.DataDir, 0o700); err != nil {
 		return err
 	}
+	// The one-shot CLI (login/unlock) must not race the server on data.json.
+	c.stopServe()
 	c.mu.Lock()
 	c.session = ""
 	c.mu.Unlock()
@@ -242,6 +255,12 @@ func (c *Client) Open(ctx context.Context) error {
 	c.mu.Lock()
 	c.session = strings.TrimSpace(session)
 	c.mu.Unlock()
+	start := time.Now()
+	if err := c.startServe(ctx); err != nil {
+		slog.Warn("bw serve unavailable, using the one-shot CLI", "err", err)
+	} else {
+		slog.Info("bw serve running", "took", time.Since(start).Round(time.Millisecond))
+	}
 	return c.load(ctx, false)
 }
 

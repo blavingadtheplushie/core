@@ -406,6 +406,13 @@ func (b *Bot) history(ctx context.Context, ev *slackevents.MessageEvent) []llm.M
 		if err == nil {
 			for i := len(res.Messages) - 1; i >= 0; i-- {
 				m := res.Messages[i]
+				// Every DM message opens its own thread (see respond): a
+				// top-level message with replies was already answered in
+				// that thread. Keeping it makes it look unanswered, and the
+				// model answers it again in an unrelated thread.
+				if answeredInThread(m) {
+					continue
+				}
 				// Only keep the recent stretch; old DMs are covered by memory.
 				if t := tsToTime(m.Timestamp); time.Since(t) < 6*time.Hour {
 					msgs = append(msgs, m)
@@ -435,6 +442,12 @@ func (b *Bot) history(ctx context.Context, ev *slackevents.MessageEvent) []llm.M
 		out = out[len(out)-40:]
 	}
 	return out
+}
+
+// answeredInThread reports whether a top-level DM message already has its
+// own thread (it was answered there).
+func answeredInThread(m slack.Message) bool {
+	return m.ReplyCount > 0 || m.LatestReply != ""
 }
 
 // botHistoryText returns what one of the bot's own messages contributes to the

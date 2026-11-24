@@ -248,7 +248,16 @@ func (l *liveMessage) finishNative(ctx context.Context, output string, ok bool) 
 	if _, _, err := l.b.API.StopStreamContext(ctx, l.channel, l.ts, opts...); err != nil {
 		slog.Warn("native Slack stream stop failed", "err", err, "mode", mode)
 		if mode == nativeComplete {
-			mode = nativeRepost // the end of the answer may be missing
+			mode = nativeRepost // the end of the answer is missing
+		}
+		// The stream must be closed anyway: a message left in streaming
+		// state can be neither deleted nor updated (streaming_state_conflict),
+		// so the half-streamed text stayed next to the reposted answer.
+		// Retry with no chunks at all (msg_too_long, bad chunk…).
+		if len(opts) > 0 {
+			if _, _, err := l.b.API.StopStreamContext(ctx, l.channel, l.ts); err != nil {
+				slog.Warn("native Slack stream stop retry failed", "err", err)
+			}
 		}
 	}
 	return mode

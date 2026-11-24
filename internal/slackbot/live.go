@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -298,9 +299,12 @@ func (l *liveMessage) finish(ctx context.Context, res agent.Result) string {
 			// again would duplicate it (Slack keeps streamed text).
 			return l.ts
 		case nativeRepost:
-			if _, _, err := l.b.API.DeleteMessageContext(ctx, l.channel, l.ts); err == nil {
-				l.ts = ""
+			// Always repost as a new message: if the delete fails, updating
+			// the old one would fail too (or stack on the streamed text).
+			if _, _, err := l.b.API.DeleteMessageContext(ctx, l.channel, l.ts); err != nil {
+				slog.Warn("could not delete the streamed message before reposting", "err", err)
 			}
+			l.ts = ""
 		}
 	}
 	chunks := Chunk(ToMrkdwn(res.Output), finalChunkSize)

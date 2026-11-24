@@ -1,6 +1,10 @@
 package slackbot
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/slack-go/slack"
+)
 
 func TestBotHistoryText(t *testing.T) {
 	cases := []struct{ text, out, want string }{
@@ -16,5 +20,16 @@ func TestBotHistoryText(t *testing.T) {
 		if got := botHistoryText(c.text, c.out); got != c.want {
 			t.Errorf("botHistoryText(%q, %q) = %q, want %q", c.text, c.out, got, c.want)
 		}
+	}
+}
+
+func TestAnsweredInThread(t *testing.T) {
+	var m slack.Message
+	if answeredInThread(m) {
+		t.Error("plain DM message is not answered")
+	}
+	m.ReplyCount = 1
+	if !answeredInThread(m) {
+		t.Error("DM message with a thread was answered there")
 	}
 }

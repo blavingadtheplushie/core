@@ -137,9 +137,10 @@ func (c *Client) AuthStart(ctx context.Context, s Server, clientID, clientSecret
 		// Can't register the new redirect: keep the one this client knows.
 		redirect = st.RedirectURI
 	}
-	if st.ClientID == "" || st.RedirectURI != redirect {
+	// A client_id given by the human is pre-registered: use it as-is, never re-register.
+	if clientID == "" && (st.ClientID == "" || st.RedirectURI != redirect) {
 		if reg == "" {
-			return "", "", errors.New("this server has no dynamic registration: pass client_id (and client_secret)")
+			return "", "", fmt.Errorf("server %q has no dynamic registration: pass client_id (and client_secret) of a pre-registered OAuth app, or use auth=bearer with an API key instead", s.Name)
 		}
 		body, _ := json.Marshal(map[string]any{"client_name": "blavingad", "redirect_uris": []string{redirect},
 			"grant_types": []string{"authorization_code", "refresh_token"}, "response_types": []string{"code"},

@@ -425,7 +425,7 @@ function renderLogin(error = '') {
 const NAV = [
   ['Workshop', [['dashboard', '#/', 'dashboard', 'Overview'], ['chat', '#/chat', 'chat', 'Chat'], ['runs', '#/runs', 'runs', 'Runs'], ['approvals', '#/approvals', 'hand', 'Approvals']]],
   ['Brain', [['memory', '#/memory', 'brain', 'Memory'], ['tools', '#/tools', 'tool', 'Tools'], ['skills', '#/skills', 'book', 'Persona & skills'], ['evolution', '#/evolution', 'dna', 'Evolution']]],
-  ['Actions', [['schedules', '#/schedules', 'clock', 'Tasks'], ['deployments', '#/deployments', 'rocket', 'Deployments'], ['proxy', '#/proxy', 'route', 'LLM proxy'], ['mcp', '#/mcp', 'tool', 'MCP servers'], ['mail', '#/mail', 'mail', 'Mailbox']]],
+  ['Actions', [['schedules', '#/schedules', 'clock', 'Tasks'], ['deployments', '#/deployments', 'rocket', 'Deployments'], ['router', '#/router', 'route', 'Model router'], ['proxy', '#/proxy', 'route', 'LLM proxy'], ['mcp', '#/mcp', 'tool', 'MCP servers'], ['mail', '#/mail', 'mail', 'Mailbox']]],
   ['System', [['access', '#/access', 'shield', 'Access'], ['vault', '#/vault', 'lock', 'Vault'], ['audit', '#/audit', 'audit', 'Audit log'], ['settings', '#/settings', 'settings', 'Settings']]],
 ];
 
@@ -842,6 +842,7 @@ const STEP_META = {
   access: ['shield', 'memory', 'Access profile'],
   thought: ['spark', 'memory', 'Thinking'],
   context: ['history', 'memory', 'Prompt size'],
+  route: ['route', 'llm', 'Model router'],
 };
 
 function parseUsage(step) {
@@ -911,6 +912,9 @@ function stepItem(step, toolsByName) {
     const cu = parseUsage(step) || {};
     label = esc(title);
     text = `~${fmtNum(cu.total || 0)} tokens sent with every model call: ${esc((cu.sections || []).filter((x) => x.tokens).sort((a, b) => b.tokens - a.tokens).slice(0, 3).map((x) => `${x.name} ${fmtCompact(x.tokens)}`).join(', '))}`;
+  } else if (step.kind === 'route') {
+    label = `${esc(title)} · <code class="muted">${esc(step.name)}</code>${step.input === 'escalate' ? badge('escalated', 'warn') : step.input === 'fast' ? badge('fast', 'ok') : badge('main', 'plain')}`;
+    text = esc(step.output);
   } else if (step.kind === 'access') {
     label = `${esc(title)} · ${esc(step.input)}`;
     text = `Restricted conversation: ${esc(step.output)}`;
@@ -1618,6 +1622,98 @@ async function testModel(button) {
   }
 }
 
+/* ---------- Model router ---------- */
+const splitList = (v) => String(v || '').split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
+
+async function renderRouter() {
+  const seq = ++state.routeSeq;
+  setNav('router');
+  setCrumbs('Model router');
+  const view = document.getElementById('view');
+  let d;
+  try { d = await api('/router'); } catch (error) { view.innerHTML = `${pageHead('Model router', '', '', 'Actions')}${errorState(error.message)}`; return; }
+  if (seq !== state.routeSeq) return;
+  state.cache.router = d;
+  const c = d.config || {};
+  const stats = d.stats || [];
+  const recent = d.recent || [];
+  const totalRuns = stats.reduce((n, r) => n + Number(r.runs || 0), 0);
+  const fastRuns = stats.filter((r) => r.model === c.model).reduce((n, r) => n + Number(r.runs || 0), 0);
+  const status = !c.enabled ? badge('off', 'plain') : d.ready ? badge('on', 'ok') : badge('not ready', 'warn');
+  view.innerHTML = `${pageHead('Model router', `Light requests start on a cheap fast model; heavy work (code, debug, deploys, self-upgrade) goes to the main model <code>${esc(d.main_model)}</code>. A run on the fast model escalates to the main model when it reaches for a heavy tool, fails, or takes too many steps. Add <code>!opus</code> or <code>!fast</code> to a message to force a side.`, `<button class="btn" type="button" data-action="router-test">${icon('spark', 'btn-icon')} Test fast model</button>`, 'Actions')}
+    <div class="grid-2" style="margin-bottom:16px">
+      <section class="card"><div class="card-head"><div><h3>Status ${status}</h3><p>${esc(d.why || (c.enabled ? 'Routing live.' : ''))}</p></div></div><div class="card-body"><dl class="kv">
+        <dt>Last 7 days</dt><dd>${fmtNum(totalRuns)} runs · ${fmtNum(fastRuns)} on the fast model${totalRuns ? ` (${Math.round(100 * fastRuns / totalRuns)} %)` : ''} · ${fmtNum(d.escalations)} escalation${d.escalations === 1 ? '' : 's'}</dd>
+        ${stats.map((r) => `<dt><code class="small">${esc(r.model)}</code></dt><dd>${fmtNum(r.runs)} runs · ${fmtCompact(r.prompt_tokens)} in / ${fmtCompact(r.completion_tokens)} out</dd>`).join('')}
+      </dl><div id="router-test-result" hidden style="margin-top:10px"></div></div></section>
+      <section class="card"><div class="card-head"><div><h3>Recent decisions</h3><p>Where each run started and why.</p></div></div><div class="card-body flush">${recent.length ? `<div class="table-wrap"><table class="data"><thead><tr><th>Run</th><th>Model</th><th>Why</th></tr></thead><tbody>${recent.map((r) => `<tr><td class="truncate-cell small"><a href="#/runs/${esc(r.run_id)}">${esc(r.input || r.run_id)}</a></td><td class="small nowrap">${r.decision === 'escalate' ? badge('↑ main', 'warn') : r.decision === 'fast' ? badge('fast', 'ok') : badge('main', 'plain')}</td><td class="small">${esc(r.reason)}</td></tr>`).join('')}</tbody></table></div>` : emptyState('No decision yet', 'Turn the router on and talk to it.', '')}</div></section>
+    </div>
+    <form id="router-form" class="stack">
+      <div class="grid-2">
+        <section class="card"><div class="card-head"><div><h3>⚡ Fast model</h3><p>Any OpenAI- or Anthropic-compatible endpoint. The key is a vault reference, never a raw key.</p></div></div><div class="card-body"><div class="form-grid">
+          <div class="span-2">${switchRow('enabled', 'Router enabled', 'When off, every run uses the main model as before.', c.enabled)}</div>
+          <div class="field span-2"><span class="label">API format</span><div class="choice-row">
+            <label class="choice"><input type="radio" name="style" value="openai" ${c.style !== 'anthropic' ? 'checked' : ''}> OpenAI-like</label>
+            <label class="choice"><input type="radio" name="style" value="anthropic" ${c.style === 'anthropic' ? 'checked' : ''}> Anthropic-like</label>
+          </div></div>
+          <div class="field span-2"><label class="label" for="rt-base">Base URL</label><input class="input mono" id="rt-base" name="base_url" value="${esc(c.base_url)}" placeholder="https://api.mistral.ai/v1"></div>
+          <div class="field"><label class="label" for="rt-key">API key <span class="hint-inline">vault://Item/field</span></label><input class="input mono" id="rt-key" name="key_ref" value="${esc(c.key_ref)}" placeholder="vault://MISTRAL_API_KEY/password"></div>
+          <div class="field"><label class="label" for="rt-model">Model</label><input class="input mono" id="rt-model" name="model" value="${esc(c.model)}" placeholder="deepseek-v4-1-flash-1017"></div>
+          <div class="span-2">${switchRow('background', 'Background calls too', 'Reflection, channel digests and context compaction use the fast model (falls back to the fast_model setting on error).', c.background)}</div>
+        </div></div></section>
+        <section class="card"><div class="card-head"><div><h3>🧭 Rules</h3><p>A run starts on the fast model only if none of these send it to the main model.</p></div><button class="btn sm" type="button" data-action="router-defaults">Reset rules</button></div><div class="card-body"><div class="form-grid">
+          <div class="field span-2"><span class="label">Sources routed to the fast model</span><div class="choice-row">${(d.sources || []).map((src) => `<label class="choice"><input type="checkbox" name="sources" value="${esc(src)}" ${(c.sources || []).includes(src) ? 'checked' : ''}> ${esc(src)}</label>`).join('')}</div><span class="field-note">Sub-agents and self-review always use the main model, and so do messages with images.</span></div>
+          <div class="field span-2"><label class="label" for="rt-kw">Heavy keywords <span class="hint-inline">comma or line separated, whole words</span></label><textarea class="textarea mono" id="rt-kw" name="heavy_keywords" rows="3">${esc((c.heavy_keywords || []).join(', '))}</textarea></div>
+          <div class="field"><label class="label" for="rt-max">Max request length <span class="hint-inline">chars · 0 = no limit</span></label><input class="input" id="rt-max" name="max_chars" type="number" min="0" value="${esc(c.max_chars)}"></div>
+          <div class="field"><label class="label" for="rt-after">Escalate after N steps <span class="hint-inline">0 = never</span></label><input class="input" id="rt-after" name="escalate_after" type="number" min="0" value="${esc(c.escalate_after)}"></div>
+          <div class="field"><label class="label" for="rt-err">Escalate after N failed tools <span class="hint-inline">0 = never</span></label><input class="input" id="rt-err" name="escalate_on_errors" type="number" min="0" value="${esc(c.escalate_on_errors)}"></div>
+          <div class="field span-2"><label class="label" for="rt-tools">Heavy tools <span class="hint-inline">calling one hands the step to the main model</span></label><textarea class="textarea mono" id="rt-tools" name="heavy_tools" rows="3">${esc((c.heavy_tools || []).join(', '))}</textarea></div>
+        </div></div></section>
+      </div>
+      <div class="row" style="justify-content:flex-end"><button class="btn primary" type="submit">Save</button></div>
+    </form>`;
+}
+
+function routerBody(form) {
+  const fd = new FormData(form);
+  return {
+    enabled: form.querySelector('[name="enabled"]').checked,
+    background: form.querySelector('[name="background"]').checked,
+    style: String(fd.get('style') || 'openai'),
+    base_url: String(fd.get('base_url') || '').trim(),
+    key_ref: String(fd.get('key_ref') || '').trim(),
+    model: String(fd.get('model') || '').trim(),
+    sources: fd.getAll('sources').map(String),
+    heavy_keywords: splitList(fd.get('heavy_keywords')),
+    heavy_tools: splitList(fd.get('heavy_tools')),
+    max_chars: Number(fd.get('max_chars')) || 0,
+    escalate_after: Number(fd.get('escalate_after')) || 0,
+    escalate_on_errors: Number(fd.get('escalate_on_errors')) || 0,
+  };
+}
+
+async function saveRouter(form) {
+  await api('/router', { method: 'PUT', body: routerBody(form) });
+  toast('Router saved');
+  await renderRouter();
+}
+
+async function testRouter(button) {
+  const form = document.getElementById('router-form');
+  button.disabled = true;
+  try {
+    if (form) await api('/router', { method: 'PUT', body: routerBody(form) });
+    const res = await api('/router/test', { method: 'POST' });
+    const out = document.getElementById('router-test-result');
+    if (out) {
+      out.hidden = false;
+      out.innerHTML = res.ok
+        ? `<div class="advanced-note">✅ <strong>${esc(res.model)}</strong> answered “${esc(res.reply)}” in ${fmtMs(res.latency_ms)}. Settings saved.</div>`
+        : `<div class="auth-error" style="margin:0">❌ <strong>${esc(res.model)}</strong>: ${esc(res.error)}</div>`;
+    }
+  } catch (error) { toast(error.message, 'err'); } finally { button.disabled = false; }
+}
+
 /* ---------- Access ---------- */
 const MEMORY_MODES = { full: ['🧠', 'Full', 'reads and remembers'], read: ['👀', 'Read-only', 'relies on memory without remembering anything'], none: ['🫥', 'None', 'no recall, no memorizing'] };
 const APPROVE_MODES = { any: 'Approves anything', own: 'Approves own requests', none: 'Approves nothing' };
@@ -1959,6 +2055,8 @@ document.addEventListener('click', async (event) => {
         confirmDialog({ title: 'Remove from the allowlist?', message: `This person will get the default profile (${state.cache.access?.default || 'guest'}).`, confirm: 'Remove', onConfirm: async () => { await api(`/access/members/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast('Removed from the allowlist'); await renderAccess(); } });
         break;
       case 'llm-test': await testModel(target); break;
+      case 'router-test': await testRouter(target); break;
+      case 'router-defaults': { const d = state.cache.router?.defaults; if (d) { await api('/router', { method: 'PUT', body: { ...d, enabled: !!state.cache.router?.config?.enabled, base_url: state.cache.router.config.base_url || d.base_url, key_ref: state.cache.router.config.key_ref || d.key_ref, model: state.cache.router.config.model || d.model } }); toast('Rules reset to defaults'); await renderRouter(); } break; }
       case 'mcp-new': mcpModal(); break;
       case 'mcp-edit': mcpModal((state.cache.mcp?.servers || []).map((x) => x.server).find((x) => x.name === id)); break;
       case 'mcp-auth': await mcpAuth(id); break;
@@ -2119,6 +2217,8 @@ document.addEventListener('submit', async (event) => {
     await run(async () => { await api('/mcp', { method: 'POST', body: { name: fd.get('name'), url: fd.get('url'), auth: fd.get('auth'), token_ref: String(fd.get('token_ref') || '').trim(), description: fd.get('description'), policy: fd.get('policy') || '', scope: String(fd.get('scope') || '').trim(), enabled: form.querySelector('[name="enabled"]').checked } }); closeModal(); toast('🔌 Server saved'); await renderMCP(); });
   } else if (form.id === 'mcp-auth-form') {
     await run(async () => { await api(`/mcp/${encodeURIComponent(form.dataset.name)}/auth/finish`, { method: 'POST', body: { redirect_url: fd.get('redirect_url') } }); closeModal(); toast('🔌 Connected'); await renderMCP(); });
+  } else if (form.id === 'router-form') {
+    await run(() => saveRouter(form));
   } else if (form.id === 'proxy-map-form') {
     await run(async () => { await api('/proxy/mappings', { method: 'POST', body: { alias: fd.get('alias'), upstream: fd.get('upstream'), model: fd.get('model') } }); toast('🔀 Alias mapped'); await renderProxy(); });
   } else if (form.id === 'proxy-key-form') {
@@ -2171,6 +2271,7 @@ async function route() {
     case 'schedules': return renderSchedules();
     case 'deployments': return renderDeployments();
     case 'mail': return renderMail();
+    case 'router': return renderRouter();
     case 'proxy': return renderProxy();
     case 'mcp': return renderMCP();
     case 'access': return renderAccess();

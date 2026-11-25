@@ -33,6 +33,15 @@ type Runner struct {
 	approvals *core.Approvals
 	access    *core.Access
 
+	// model router (router.go)
+	fastOnce   sync.Once
+	fast       *llm.Client
+	fastMu     sync.Mutex
+	fastKey    string
+	fastKeyRef string
+	fastKeyAt  time.Time
+	resolveKey func(ctx context.Context, ref string) (string, error)
+
 	mu     sync.Mutex
 	active map[string]*activeRun
 	wg     sync.WaitGroup
@@ -217,6 +226,12 @@ func (r *Runner) stepUsage(runID, kind, name, input, output, status string, dur 
 // Run executes one agent turn end-to-end.
 func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 	s := r.Settings()
+	mainModel := s.Model
+	rcfg := r.RouterConfig()
+	routeFast, routeWhy := r.Route(req)
+	if routeFast {
+		s.Model, s.onFast = rcfg.Model, true
+	}
 	res.RunID = store.NewID("run")
 	res.Status = "running"
 	r.wg.Add(1)
@@ -239,6 +254,19 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 	r.bus.Publish("run.started", map[string]any{"id": res.RunID, "source": req.Source, "user": req.UserName, "input": textutil.Short(req.Text, 200), "parent_id": req.ParentID})
 	if req.OnStart != nil {
 		req.OnStart(res.RunID)
+	}
+	if rcfg.Enabled {
+		r.step(res.RunID, "route", s.Model, map[bool]string{true: "fast", false: "main"}[routeFast], routeWhy, "ok", 0, 0)
+	}
+	fastErrors := 0
+	escalate := func(why string) {
+		if !s.onFast {
+			return
+		}
+		s.Model, s.onFast = mainModel, false
+		res.Model = mainModel
+		r.st.DB.Exec(`UPDATE runs SET model = ? WHERE id = ?`, mainModel, res.RunID)
+		r.step(res.RunID, "route", mainModel, "escalate", why, "ok", 0, 0)
 	}
 	progress := func(p Progress) {
 		if req.OnProgress != nil {
@@ -369,18 +397,26 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 		}
 		r.st.DB.Exec(`UPDATE runs SET iterations = ? WHERE id = ?`, iter, res.RunID)
 		msgs = r.compact(ctx, res.RunID, msgs, s)
+		if s.onFast && rcfg.EscalateAfter > 0 && iter > rcfg.EscalateAfter {
+			escalate(fmt.Sprintf("still working after %d steps on the fast model", rcfg.EscalateAfter))
+		}
 		progress(Progress{Kind: "thinking", Iteration: iter})
 		start := time.Now()
 		creq := llm.Request{Model: s.Model, Messages: msgs, Tools: defs, Temperature: &temp, MaxTokens: max(r.cfg.LLMMaxTokens, boost)}
 		if req.Depth == 0 && req.OnProgress != nil {
 			creq.OnText = draftStreamer(func(text string) { req.OnProgress(Progress{Kind: "draft", Text: text, Iteration: iter}) })
 		}
-		resp, err := r.llm.Chat(ctx, creq)
+		resp, err := r.chatClient(s).Chat(ctx, creq)
 		if req.Depth == 0 && req.OnProgress != nil {
 			req.OnProgress(Progress{Kind: "draft", Text: "", Iteration: iter}) // the turn is over: drop the draft
 		}
 		if err != nil {
 			r.step(res.RunID, "llm", s.Model, "", err.Error(), "error", time.Since(start), 0)
+			if s.onFast && ctx.Err() == nil {
+				escalate("fast model error: " + textutil.Short(core.Secrets.Redact(err.Error()), 200))
+				iter--
+				continue
+			}
 			if ctx.Err() == nil && retries < s.LLMRetries {
 				retries++
 				progress(Progress{Kind: "note", Label: fmt.Sprintf("model error, retrying (%d/%d)", retries, s.LLMRetries)})
@@ -416,6 +452,15 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 			iter--
 			continue
 		}
+		if s.onFast {
+			if t := heavyCall(rcfg, resp.Message.ToolCalls); t != "" {
+				// Heavy work: drop this reply and let the main model redo the step.
+				r.stepUsage(res.RunID, "llm", s.Model+" (handed over)", t, resp.Message.Content, "ok", time.Since(start), resp.Usage.PromptTokens+resp.Usage.CompletionTokens, usageDetail(resp.Usage))
+				escalate("fast model reached for " + t)
+				iter--
+				continue
+			}
+		}
 		retries = 0
 		var names []string
 		for _, tc := range resp.Message.ToolCalls {
@@ -445,6 +490,16 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 		partial, boost = "", 0
 		results := r.execTools(ctx, rc, resp.Message.ToolCalls, progress, iter)
 		res.ToolCalls += len(results)
+		if s.onFast && rcfg.EscalateOnErrors > 0 {
+			for _, out := range results {
+				if strings.HasPrefix(out, "Error") || strings.HasPrefix(out, "Internal tool error") {
+					fastErrors++
+				}
+			}
+			if fastErrors >= rcfg.EscalateOnErrors {
+				escalate(fmt.Sprintf("%d failed tool calls on the fast model", fastErrors))
+			}
+		}
 		for i, tc := range resp.Message.ToolCalls {
 			content, imgs := toolImages(results[i])
 			msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: tc.ID, Name: tc.Function.Name, Content: content, Images: imgs})
@@ -452,7 +507,7 @@ func (r *Runner) Run(parent context.Context, req Request) (res Result) {
 		msgs = llm.CapImages(msgs, maxContextImages)
 		if iter == maxIter {
 			msgs = append(msgs, llm.Message{Role: "user", Content: "[System] Step limit reached. Answer now without calling any tool: summarize what you did, the result, and what is left to do."})
-			resp, err := r.llm.Chat(ctx, llm.Request{Model: s.Model, Messages: msgs, Temperature: &temp, MaxTokens: r.cfg.LLMMaxTokens})
+			resp, err := r.chatClient(s).Chat(ctx, llm.Request{Model: s.Model, Messages: msgs, Temperature: &temp, MaxTokens: r.cfg.LLMMaxTokens})
 			if err != nil {
 				runErr = err
 				return
@@ -495,7 +550,7 @@ func (r *Runner) recoverEmpty(ctx context.Context, runID string, s Settings, his
 		Content: "[System] Your last reply was empty. Write your final answer to the user now, as plain text, based on what you did above. Do not call any tool."})
 	temp := s.Temperature
 	start := time.Now()
-	resp, err := r.llm.Chat(ctx, llm.Request{Model: s.Model, Messages: msgs, Temperature: &temp, MaxTokens: maxTokens})
+	resp, err := r.chatClient(s).Chat(ctx, llm.Request{Model: s.Model, Messages: msgs, Temperature: &temp, MaxTokens: maxTokens})
 	if err == nil {
 		addUsage(usage, resp.Usage)
 		out := core.Secrets.Redact(strings.TrimSpace(resp.Message.Content))
@@ -655,7 +710,7 @@ func (r *Runner) compact(ctx context.Context, runID string, msgs []llm.Message, 
 	}
 	start := time.Now()
 	summary := clip(b.String(), 12000)
-	resp, err := r.llm.Chat(ctx, llm.Request{Model: s.FastModel, MaxTokens: 1500, Temperature: llm.F(0.2), Messages: []llm.Message{
+	resp, err := r.bgChat(ctx, llm.Request{Model: s.FastModel, MaxTokens: 1500, Temperature: llm.F(0.2), Messages: []llm.Message{
 		{Role: "system", Content: "Faithfully summarize this part of an AI agent's conversation: goals, decisions, facts discovered, important files/URLs/IDs, what is left to do. Dense bullet list."},
 		{Role: "user", Content: summary},
 	}})

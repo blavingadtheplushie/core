@@ -210,6 +210,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/llm/models", a(s.llmModels))
 	mux.HandleFunc("POST /api/llm/test", a(s.llmTest))
 
+	mux.HandleFunc("GET /api/router", a(s.getRouter))
+	mux.HandleFunc("PUT /api/router", a(s.putRouter))
+	mux.HandleFunc("POST /api/router/test", a(s.testRouter))
 	mux.HandleFunc("GET /api/settings", a(s.getSettings))
 	mux.HandleFunc("PATCH /api/settings", a(s.patchSettings))
 	mux.HandleFunc("GET /api/audit", a(s.listAudit))

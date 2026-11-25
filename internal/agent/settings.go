@@ -34,6 +34,9 @@ type Settings struct {
 	// LLMRetries is how many times in a row a model call is retried (or a
 	// reply cut off by the token limit is resumed) before the run gives up.
 	LLMRetries int `json:"llm_retries"`
+
+	// onFast is set by the router for the run it belongs to.
+	onFast bool
 }
 
 var SettingKeys = []string{"api_style", "base_url", "model", "fast_model", "temperature", "max_iterations", "reflection", "self_review", "self_review_cron", "follow_threads", "email_auto", "email_profile", "home_channel", "channel_digest", "extra_prompt", "bot_reply_limit", "use_proxy", "llm_retries"}

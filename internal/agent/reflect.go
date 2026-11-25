@@ -65,13 +65,13 @@ func (r *Runner) reflect(runID string, rc *core.RunContext, msgs []llm.Message) 
 	s := r.Settings()
 	// 1500 tokens was always eaten by thinking (13/13 first tries cut at
 	// max_tokens on 2026-11-19), so start with the room the retry needed.
-	resp, err := r.llm.Chat(ctx, llm.Request{Model: s.FastModel, JSONMode: true, Temperature: llm.F(0.1), MaxTokens: 6000, Messages: []llm.Message{
+	resp, err := r.bgChat(ctx, llm.Request{Model: s.FastModel, JSONMode: true, Temperature: llm.F(0.1), MaxTokens: 6000, Messages: []llm.Message{
 		{Role: "system", Content: fmt.Sprintf(reflectPrompt, r.cfg.AgentName) + "\nThink briefly. Output the JSON object only."},
 		{Role: "user", Content: "Already known:\n" + kb.String() + "\n\nExchange:\n" + transcript},
 	}})
 	if err != nil {
 		// Some servers reject response_format; retry once without it.
-		resp, err = r.llm.Chat(ctx, llm.Request{Model: s.FastModel, Temperature: llm.F(0.1), MaxTokens: 6000, Messages: []llm.Message{
+		resp, err = r.bgChat(ctx, llm.Request{Model: s.FastModel, Temperature: llm.F(0.1), MaxTokens: 6000, Messages: []llm.Message{
 			{Role: "system", Content: fmt.Sprintf(reflectPrompt, r.cfg.AgentName)},
 			{Role: "user", Content: "Already known:\n" + kb.String() + "\n\nExchange:\n" + transcript},
 		}})
@@ -91,7 +91,7 @@ func (r *Runner) reflect(runID string, rc *core.RunContext, msgs []llm.Message) 
 		// Usually an empty reply: the fast model spent its whole budget
 		// thinking (finish=length). Retry once with more room.
 		slog.Warn("reflection parse failed, retrying", "err", err, "finish", resp.FinishReason, "len", len(resp.Message.Content))
-		resp2, err2 := r.llm.Chat(ctx, llm.Request{Model: s.FastModel, JSONMode: true, Temperature: llm.F(0.1), MaxTokens: 6000, Messages: []llm.Message{
+		resp2, err2 := r.bgChat(ctx, llm.Request{Model: s.FastModel, JSONMode: true, Temperature: llm.F(0.1), MaxTokens: 6000, Messages: []llm.Message{
 			{Role: "system", Content: fmt.Sprintf(reflectPrompt, r.cfg.AgentName) + "\nThink briefly. Output the JSON object only."},
 			{Role: "user", Content: "Already known:\n" + kb.String() + "\n\nExchange:\n" + transcript},
 		}})
@@ -171,7 +171,7 @@ func (r *Runner) DigestChannel(ctx context.Context, channel string) error {
 		return nil
 	}
 	s := r.Settings()
-	resp, err := r.llm.Chat(ctx, llm.Request{Model: s.FastModel, Temperature: llm.F(0.2), MaxTokens: 900, Messages: []llm.Message{
+	resp, err := r.bgChat(ctx, llm.Request{Model: s.FastModel, Temperature: llm.F(0.2), MaxTokens: 900, Messages: []llm.Message{
 		{Role: "system", Content: "You maintain the summary of a Slack channel for an AI agent. Merge the previous summary and the new messages into an up-to-date summary (at most 15 bullets): what the channel is about, ongoing projects and decisions, who does what, open questions. Drop what is outdated. No secrets."},
 		{Role: "user", Content: "Channel #" + name + "\n\nPrevious summary:\n" + digest + "\n\nNew messages:\n" + clip(b.String(), 30000)},
 	}})

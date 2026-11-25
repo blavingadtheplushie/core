@@ -148,6 +148,9 @@ func serve() int {
 		ml = mail.New(cfg, st, bus)
 	}
 	runner := agent.NewRunner(cfg, st, mem, client, reg, bus, approvals, access)
+	if vc.Enabled() {
+		runner.SetKeyResolver(vc.Resolve)
+	}
 
 	var bot *slackbot.Bot
 	if cfg.SlackConfigured() {
